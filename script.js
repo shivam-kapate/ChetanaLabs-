@@ -1,0 +1,2288 @@
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("🚀 Dashboard Initialized");
+
+    // 1. Initialize System
+    initNavigation();
+    initSidebar();
+    initRippleEffect();
+    initToasts();
+
+    // 2. Load User Profile (THIS IS NEW)
+    loadUserProfile();
+
+    // 3. Set Initial View
+    switchView('dashboard', document.querySelector('.nav-link.active'));
+    switchStepperStep(1);
+    initProfileMenu();
+    handleWelcomeSequence();
+    loadDashboardRealData();
+
+
+    loadLiveActivityTable();
+    loadAllCandidatesTable();
+});
+
+let candidateIdToDelete = null;
+let candidateRowToDelete = null;
+
+function initProfileMenu() {
+    const profileBtn = document.getElementById('userProfileBtn');
+    const profileMenu = document.getElementById('profileMenu');
+
+    if (!profileBtn || !profileMenu) return;
+
+    // Toggle Menu on Click
+    profileBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent immediate closing
+        profileMenu.classList.toggle('show');
+        profileBtn.classList.toggle('active'); // Rotates the arrow
+    });
+
+    // Close Menu when clicking anywhere else
+    document.addEventListener('click', (e) => {
+        if (!profileMenu.contains(e.target) && !profileBtn.contains(e.target)) {
+            profileMenu.classList.remove('show');
+            profileBtn.classList.remove('active');
+        }
+    });
+}
+
+async function loadUserProfile() {
+    try {
+        const response = await fetch('/api/me');
+        const user = await response.json();
+
+        if (user.error) return;
+
+        /* --- 1. UPDATE SIDEBAR --- */
+        const sbName = document.querySelector('.user-info h4');
+        if (sbName) sbName.textContent = user.name;
+
+        const sbAvatar = document.querySelector('.user-profile .avatar');
+        if (sbAvatar && user.picture) {
+            sbAvatar.innerHTML = `
+                <img src="${user.picture}" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
+                <div class="status-indicator"></div>
+            `;
+            sbAvatar.style.background = 'transparent';
+            sbAvatar.style.border = 'none';
+        }
+
+        /* --- 2. UPDATE SETTINGS / PROFILE PAGE (The New Part) --- */
+
+        // Header Section
+        const pageName = document.getElementById('settings-name');
+        const pageEmail = document.getElementById('settings-email');
+        const pageAvatar = document.getElementById('settings-avatar');
+
+        if (pageName) pageName.textContent = user.name;
+        if (pageEmail) pageEmail.textContent = user.email;
+        if (pageAvatar && user.picture) pageAvatar.src = user.picture;
+
+        // Form Inputs
+        const inputName = document.getElementById('input-name');
+        const inputEmail = document.getElementById('input-email');
+
+        if (inputName) inputName.value = user.name;
+        if (inputEmail) inputEmail.value = user.email;
+
+    } catch (error) {
+        console.error("Failed to load user profile:", error);
+    }
+}
+
+// --- Navigation Logic ---
+function initNavigation() {
+    const navLinks = document.querySelectorAll('.nav-link');
+
+    navLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+
+            // Remove active class from all links
+            navLinks.forEach(l => l.classList.remove('active'));
+
+            // Add active class to clicked link
+            link.classList.add('active');
+
+            // Get view ID from onclick attribute
+            const onclickAttr = link.getAttribute('onclick');
+            let viewId = 'dashboard';
+
+            if (onclickAttr) {
+                const match = onclickAttr.match(/'([^']+)'/);
+                if (match) viewId = match[1];
+            }
+
+            switchView(viewId);
+        });
+    });
+}
+
+/**
+ * Manages the visibility of the main content views and triggers specific actions 
+ * like header display and campaign loading based on the target view ID.
+ * * @param {string} viewId The ID of the section to show (e.g., 'dashboard', 'campaigns', 'video-assistant').
+ */
+function switchView(viewId) {
+    // 1. Hide all views
+    document.querySelectorAll('.view-section').forEach(section => {
+        section.classList.remove('active');
+    });
+
+    // 2. Show target view
+    const targetSection = document.getElementById(viewId);
+    if (targetSection) {
+        targetSection.classList.add('active');
+    }
+
+    // 3. Update Page Title (Optional: Title is hidden in campaign/settings views)
+    const titles = {
+        'dashboard': 'Dashboard Overview',
+        'candidates': 'Candidates & Call History',
+        'reports': 'Campaign Reports',
+        'campaigns': 'AI Interview Campaign Builder',
+        'video-assistant': 'AI Video Assistant',
+        'settings': 'Account Settings'
+    };
+
+    const titleElement = document.getElementById('page-title');
+    if (titleElement && titles[viewId]) {
+        titleElement.textContent = titles[viewId];
+    }
+
+    // 4. Handle Layout (Header & Padding)
+    const contentArea = document.getElementById('content-area');
+    const topHeader = document.querySelector('.top-header');
+
+    if (viewId === 'dashboard' || viewId === 'settings') {
+        // --- DASHBOARD & SETTINGS: Simple Views, No Header ---
+        if (topHeader) topHeader.style.display = 'none';
+        if (contentArea) contentArea.classList.remove('campaigns-view-active');
+
+    } else if (viewId === 'campaigns') {
+        // --- AUDIO CAMPAIGNS: Full-screen Builder ---
+        if (topHeader) topHeader.style.display = 'none';
+        if (contentArea) contentArea.classList.add('campaigns-view-active');
+
+        // Load Audio Campaigns
+        loadUserCampaigns('audio');
+
+    } else if (viewId === 'video-assistant') {
+        // --- VIDEO CAMPAIGNS: Full-screen Builder + Coming Soon Animation ---
+        if (topHeader) topHeader.style.display = 'none';
+        if (contentArea) contentArea.classList.add('campaigns-view-active');
+
+        // Load Video Campaigns (If implemented later)
+        // loadUserCampaigns('video'); 
+
+        // Trigger the star field animation for the Coming Soon screen
+        // (200 stars, min speed 8s, max speed 15s)
+        createStars(200, 8, 15, 'video-assistant');
+
+    } else {
+        // --- STANDARD VIEWS (Candidates, Reports): Show Header ---
+        if (topHeader) {
+            topHeader.style.display = 'flex';
+            topHeader.classList.add('header-bordered');
+        }
+        if (contentArea) contentArea.classList.remove('campaigns-view-active');
+    }
+}
+// --- Stepper Switcher (Horizontal Layout) ---
+function switchStepperStep(stepNumber) {
+    // 1. Deactivate all navigation items and panes
+    document.querySelectorAll('#campaigns .stepper-nav .step-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    document.querySelectorAll('#campaigns .stepper-content-wrapper .stepper-pane').forEach(pane => {
+        pane.classList.remove('active');
+    });
+
+    // 2. Activate the target navigation item
+    const targetNav = document.getElementById(`step-nav-${stepNumber}`);
+    if (targetNav) {
+        targetNav.classList.add('active');
+    }
+
+    // 3. Activate the target content pane
+    const targetPane = document.getElementById(`step-pane-${stepNumber}`);
+    if (targetPane) {
+        targetPane.classList.add('active');
+    }
+
+    // 4. Highlight lines for completed steps (visual check)
+    document.querySelectorAll('#campaigns .stepper-nav .step-item').forEach((item, index) => {
+        // index is 0-based, stepNumber is 1-based
+        if (index < stepNumber - 1) {
+            item.classList.add('completed');
+        } else {
+            item.classList.remove('completed');
+        }
+    });
+}
+
+// --- Campaign List Logic ---
+function selectCampaign(element, campaignName) {
+    // 1. Update visual selection
+    document.querySelectorAll('.campaign-item').forEach(item => item.classList.remove('active'));
+    element.classList.add('active');
+
+    // 2. Update Header
+    document.getElementById('current-campaign-title').textContent = campaignName;
+
+    // 3. Mock: update the input field for Step 1
+    const campaignNameInput = document.querySelector('#step-pane-1 input[type="text"]');
+    if (campaignNameInput) {
+        campaignNameInput.value = campaignName;
+    }
+
+    showToast(`Selected campaign: ${campaignName}`, 'info');
+    // 4. Reset stepper to first step 
+    switchStepperStep(1);
+}
+
+function createNewCampaign() {
+    document.querySelectorAll('.campaign-item').forEach(item => item.classList.remove('active'));
+
+    const newCampaignTitle = 'Untitled New Campaign';
+    document.getElementById('current-campaign-title').textContent = newCampaignTitle;
+
+    // Clear form and reset stepper (Mock form clearing)
+    const campaignNameInput = document.querySelector('#step-pane-1 input[type="text"]');
+    if (campaignNameInput) campaignNameInput.value = newCampaignTitle;
+
+    document.querySelector('#step-pane-1 textarea').value = '';
+    document.querySelector('#step-pane-4 textarea').value = '';
+
+    showToast('Initiating new campaign creation...', 'info');
+    switchStepperStep(1);
+}
+
+// --- Reports Logic (Mock) ---
+function updateCampaignStats(campaignValue) {
+    // Mock logic to simulate data changing when campaign changes
+    const stats = {
+        'q4': { selected: 42, rejected: 18, pending: 156 },
+        'tech': { selected: 12, rejected: 5, pending: 45 },
+        'intern': { selected: 85, rejected: 30, pending: 210 }
+    };
+
+    const data = stats[campaignValue] || stats['q4'];
+
+    // Update DOM elements
+    document.getElementById('stat-selected').textContent = data.selected;
+    document.getElementById('stat-rejected').textContent = data.rejected;
+    document.getElementById('stat-pending').textContent = data.pending;
+
+    showToast(`Loaded data for campaign: ${campaignValue.toUpperCase()}`, 'info');
+}
+
+function exportCampaignData() {
+    // Mock CSV export
+    showToast('Preparing CSV download...', 'info');
+    setTimeout(() => {
+        showToast('Report downloaded successfully!', 'success');
+    }, 1500);
+}
+
+// --- Sidebar Toggle ---
+function initSidebar() {
+    const sidebar = document.querySelector('.sidebar');
+    if (!sidebar) return;
+}
+
+// --- Ripple Effect ---
+function initRippleEffect() {
+    document.querySelectorAll('.btn').forEach(btn => {
+        btn.addEventListener('click', function (e) {
+            this.style.transform = 'scale(0.98)'; // Smaller scale change
+            setTimeout(() => {
+                this.style.transform = 'scale(1)';
+            }, 100);
+        });
+    });
+}
+
+// --- Toast Notification System ---
+function initToasts() {
+    if (!document.querySelector('.toast-container')) {
+        const container = document.createElement('div');
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+}
+
+function showToast(message, type = 'success') {
+    const container = document.querySelector('.toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast`;
+
+    let icon = 'fa-check-circle';
+    let color = 'var(--success-text)';
+
+    if (type === 'error') {
+        icon = 'fa-exclamation-circle';
+        color = 'var(--danger-text)';
+        toast.style.borderLeftColor = 'var(--danger)';
+    } else if (type === 'info') {
+        icon = 'fa-info-circle';
+        color = 'var(--primary-600)';
+        toast.style.borderLeftColor = 'var(--primary-600)';
+    }
+
+    toast.innerHTML = `
+        <i class="fa-solid ${icon} toast-icon" style="color: ${color}"></i>
+        <span class="toast-message">${message}</span>
+    `;
+
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => {
+        toast.classList.add('show');
+    });
+
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+            toast.remove();
+        }, 300);
+    }, 3000);
+}
+
+
+
+
+
+// --- LOAD CAMPAIGN DATA (Corrected) ---
+async function selectVapiCampaign(element, title, campaignId) {
+    // 1. UI Updates
+    document.querySelectorAll('.vapi-list-item').forEach(el => el.classList.remove('active'));
+    if (element) element.classList.add('active');
+
+    const titleEl = document.getElementById('vapi-campaign-title');
+    if (titleEl) titleEl.textContent = title;
+
+    // 2. Set Active Global ID
+    activeCampaignId = campaignId;
+
+    // 3. Clear Table & Show Loading
+    const tbody = document.getElementById('candidates-list-body');
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:gray;"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</td></tr>';
+
+    try {
+        // 4. Fetch Candidates from DB
+        const candRes = await fetch(`/api/campaigns/${campaignId}/candidates`);
+        const candData = await candRes.json();
+
+        // Clear Loading Spinner
+        tbody.innerHTML = '';
+
+        if (candData.candidates && candData.candidates.length > 0) {
+            candData.candidates.forEach(c => {
+                // ✅ FIX IS HERE: We pass c.id as the 4th argument
+                addCandidateRowToUI(c.name, c.phone, c.email, c.id);
+            });
+            document.getElementById('candidate-count').innerText = candData.candidates.length;
+        } else {
+            // Empty State
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="empty-state-row">
+                        <i class="fa-solid fa-users-slash"></i>
+                        <span>No candidates added yet.</span>
+                    </td>
+                </tr>
+            `;
+            document.getElementById('candidate-count').innerText = "0";
+        }
+
+        // 5. Fetch Config (Rest of your code...)
+        const campRes = await fetch(`/api/campaigns/${campaignId}`);
+        const campData = await campRes.json();
+
+        if (campData.config) {
+            if (campData.config.company_name) document.getElementById('sb-company').value = campData.config.company_name;
+            if (campData.config.job_role) document.getElementById('sb-job-role').value = campData.config.job_role;
+            if (campData.config.description) document.getElementById('sb-description').value = campData.config.description;
+        }
+
+    } catch (e) {
+        console.error("Error loading campaign data:", e);
+    }
+}
+
+function switchVapiTab(element) {
+    document.querySelectorAll('.vapi-tab').forEach(el => el.classList.remove('active'));
+    element.classList.add('active');
+    // In a real app, this would toggle visibility of the form sections below
+}
+
+
+
+// --- New HR Dashboard Logic ---
+
+// Switch between the new HR tabs (Candidates, Structure, etc.)
+function switchHrTab(tabId, tabElement) {
+    // 1. Reset all tabs
+    document.querySelectorAll('.vapi-tab').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.hr-tab-content').forEach(el => el.classList.remove('active'));
+
+    // 2. Activate clicked tab
+    tabElement.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+}
+
+// Remove the old selectRound function and add this:
+
+function selectOption(element, containerId) {
+    // 1. Find the container (either mode-selection or time-selection)
+    const container = document.getElementById(containerId);
+
+    // 2. Remove 'selected' class from ALL cards strictly within that container
+    const siblings = container.querySelectorAll('.round-option-card');
+    siblings.forEach(card => card.classList.remove('selected'));
+
+    // 3. Add 'selected' class to the clicked card
+    element.classList.add('selected');
+
+    // 4. Optional: Toast for feedback
+    const title = element.querySelector('.card-title').innerText;
+    // Don't spam toasts, just console log or subtle effect
+    console.log(`Selected ${title}`);
+}
+
+
+
+
+
+
+
+// Expose functions globally
+window.switchView = switchView;
+window.showToast = showToast;
+window.updateCampaignStats = updateCampaignStats;
+window.exportCampaignData = exportCampaignData;
+window.switchStepperStep = switchStepperStep;
+window.selectCampaign = selectCampaign;
+window.createNewCampaign = createNewCampaign;
+
+
+
+
+
+
+
+
+
+async function loadUserCampaigns(type = 'audio') {
+    try {
+        const response = await fetch('/api/campaigns');
+        const data = await response.json();
+
+        if (data.campaigns) {
+            // Filter: Show only the requested type (Audio or Video)
+            // If DB has no type field, assume it's 'audio'
+            const filtered = data.campaigns.filter(c =>
+                (c.type === type) || (!c.type && type === 'audio')
+            );
+            populateCampaignsSidebar(filtered, type);
+        }
+    } catch (error) {
+        console.error("Failed to load campaigns:", error);
+    }
+}
+
+let activeCampaignId = null;
+
+// --- UPDATED POPULATE FUNCTION ---
+function populateCampaignsSidebar(campaigns, type) {
+    let listId = type === 'video' ? 'video-list-container' : 'campaigns-list-container';
+    let blankId = type === 'video' ? 'video-blank-state' : 'campaign-blank-state';
+    let contentId = type === 'video' ? 'video-builder-content' : 'campaign-builder-content';
+    let titleId = type === 'video' ? 'video-campaign-title' : 'vapi-campaign-title';
+
+    const container = document.getElementById(listId);
+    const blankState = document.getElementById(blankId);
+    const builderContent = document.getElementById(contentId);
+
+    if (!container) return;
+    container.innerHTML = '';
+
+    // Handle Empty State
+    if (campaigns.length === 0) {
+        if (builderContent) builderContent.style.display = 'none';
+        if (blankState) blankState.style.display = 'flex';
+        activeCampaignId = null;
+        return;
+    }
+
+    if (builderContent) builderContent.style.display = 'flex';
+    if (blankState) blankState.style.display = 'none';
+
+    campaigns.forEach((campaign, index) => {
+        const isActive = index === 0 ? ' active' : '';
+        const el = document.createElement('div');
+        el.className = `vapi-list-item${isActive}`;
+
+        // Auto-select first item logic (Same as before)
+        if (index === 0) {
+            selectVapiCampaign(null, campaign.name, campaign.id);
+            // We pass null as element initially, then add active class below
+        }
+
+        // Click Event: Select Campaign
+        el.onclick = (e) => {
+            selectVapiCampaign(el, campaign.name, campaign.id);
+        };
+
+        // Inner HTML: Name + Delete Button
+        // Note: onclick="deleteCampaign(...)" includes event.stopPropagation() 
+        // to prevent selecting the campaign when trying to delete it.
+        el.innerHTML = `
+            <div>
+                <span class="vapi-item-name">${campaign.name}</span>
+                <span class="vapi-item-id">#${campaign.id.substring(0, 8)}</span>
+            </div>
+            <button class="btn-delete-campaign" onclick="deleteCampaign(event, '${campaign.id}', '${type}')" title="Delete Campaign">
+                <i class="fa-solid fa-trash"></i>
+            </button>
+        `;
+
+        container.appendChild(el);
+    });
+}
+
+// --- NEW: Handle Campaign Creation Flow ---
+// Update Modal to accept type
+function showCreateCampaignModal(type = 'audio') {
+    const label = type === 'video' ? "Video" : "Audio";
+    const campaignName = prompt(`Enter name for new ${label} Campaign:`);
+
+    if (campaignName && campaignName.trim() !== "") {
+        createCampaignAPI(campaignName.trim(), type);
+    }
+}
+
+async function createCampaignAPI(name, type) {
+    showToast(`Creating ${type} campaign...`, 'info');
+    try {
+        const response = await fetch('/api/campaigns/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, type: type }) // Send Type!
+        });
+
+        if (!response.ok) throw new Error('Failed');
+
+        showToast('Created successfully!', 'success');
+
+        // Reload only the relevant list
+        await loadUserCampaigns(type);
+
+    } catch (error) {
+        console.error(error);
+        showToast("Error creating campaign.", 'error');
+    }
+}
+
+
+/**
+ * Creates and animates stars in a specified container.
+ * * @param {number} numStars The total number of stars to generate (e.g., 50 to 200).
+ * @param {number} minSpeed The minimum animation duration in seconds (shorter = faster).
+ * @param {number} maxSpeed The maximum animation duration in seconds.
+ * @param {string} containerId The ID of the parent view section (e.g., 'video-assistant').
+ */
+function createStars(numStars, minSpeed, maxSpeed, containerId = 'video-assistant') {
+    const starContainer = document.querySelector(`#${containerId} .stars-background`);
+    if (!starContainer) return;
+
+    // Clear existing stars to prevent duplicates
+    starContainer.innerHTML = '';
+
+    for (let i = 0; i < numStars; i++) {
+        const star = document.createElement('div');
+        star.className = 'star';
+
+        // Random position (using viewport units for whole-page coverage)
+        const x = Math.random() * 100; // % width
+        const y = Math.random() * 100; // % height
+        star.style.left = `${x}vw`;
+        star.style.top = `${y}vh`;
+
+        // Random size (1px to 4px)
+        const size = Math.random() * 3 + 1;
+        star.style.width = `${size}px`;
+        star.style.height = `${size}px`;
+
+        // Random animation duration and delay (Controlling Speed)
+        // Duration is between minSpeed and maxSpeed
+        const duration = Math.random() * (maxSpeed - minSpeed) + minSpeed;
+        const delay = Math.random() * (minSpeed * 0.5); // Delay is max 50% of minSpeed
+
+        star.style.animationDuration = `${duration}s`;
+        star.style.animationDelay = `${delay}s`;
+
+        starContainer.appendChild(star);
+    }
+}
+// Update API call to send type
+async function createNewCampaign(campaignName, type) {
+    showToast(`Creating ${type} campaign...`, 'info');
+
+    try {
+        const response = await fetch('/api/campaigns/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // SEND TYPE TO BACKEND
+            body: JSON.stringify({ name: campaignName, type: type })
+        });
+
+        if (!response.ok) throw new Error('Failed');
+
+        const result = await response.json();
+        showToast('Created successfully!', 'success');
+
+        // Reload the specific list we just added to
+        await loadUserCampaigns(type);
+
+    } catch (error) {
+        console.error(error);
+        showToast("Failed to create campaign.", 'error');
+    }
+}
+
+// --- LOAD CAMPAIGN DATA (Updated) ---
+async function selectVapiCampaign(element, title, campaignId) {
+    // 1. UI Updates
+    document.querySelectorAll('.vapi-list-item').forEach(el => el.classList.remove('active'));
+    if (element) element.classList.add('active');
+    document.getElementById('vapi-campaign-title').textContent = title;
+
+    // 2. Set Active Global ID
+    activeCampaignId = campaignId;
+
+    // REMOVED THE TOAST HERE as requested
+    // showToast(...); <--- Deleted
+
+    try {
+        // 3. Fetch Candidates from DB
+        const candRes = await fetch(`/api/campaigns/${campaignId}/candidates`);
+        const candData = await candRes.json();
+
+        // 4. Render Candidates (Source Data Tab)
+        const tbody = document.getElementById('candidates-list-body');
+        tbody.innerHTML = '';
+
+        if (candData.candidates && candData.candidates.length > 0) {
+            candData.candidates.forEach(c => {
+                // Use the UI helper to add row without saving again
+                addCandidateRowToUI(c.name, c.phone, c.email);
+            });
+            document.getElementById('candidate-count').innerText = candData.candidates.length;
+        } else {
+            document.getElementById('candidate-count').innerText = "0";
+        }
+
+        // 5. Fetch Campaign Config (To restore selected cards)
+        const campRes = await fetch(`/api/campaigns/${campaignId}`);
+        const campData = await campRes.json();
+
+        // Restore saved inputs if they exist
+        if (campData.config) {
+            if (campData.config.company_name) document.getElementById('sb-company').value = campData.config.company_name;
+            if (campData.config.job_role) document.getElementById('sb-job-role').value = campData.config.job_role;
+            if (campData.config.description) document.getElementById('sb-description').value = campData.config.description;
+        }
+
+    } catch (e) {
+        console.error("Error loading campaign data:", e);
+    }
+}
+// Expose the new function globally
+window.showCreateCampaignModal = showCreateCampaignModal;
+window.selectVapiCampaign = selectVapiCampaign;
+window.loadUserCampaigns = loadUserCampaigns;
+
+
+
+
+
+let extractedCandidates = []; // Temporary storage for Excel data
+
+// 1. Handle File Upload
+
+
+// --- IN script.js ---
+// Find your handleFileUpload function and ensure it looks like this:
+
+async function handleFileUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    showToast("Smart-scanning file...", "info");
+
+    try {
+        const res = await fetch("/api/parse-candidates", {
+            method: "POST",
+            body: formData
+        });
+
+        const data = await res.json();
+
+        if (data.candidates && data.candidates.length > 0) {
+            extractedCandidates = data.candidates;
+
+            // Show Success Message with count
+            showToast(`Found ${data.candidates.length} valid candidates (skipped empty phones).`, "success");
+
+            // Populate Popup Preview (Same as before)
+            const body = document.getElementById("preview-body");
+            body.innerHTML = "";
+
+            data.candidates.slice(0, 5).forEach(c => { // Preview only first 5
+                body.innerHTML += `
+                    <tr>
+                        <td>${c.name}</td>
+                        <td class="text-muted">${c.email || '-'}</td>
+                        <td class="font-mono text-muted">${c.phone}</td>
+                    </tr>
+                `;
+            });
+
+            // If more than 5, show a note
+            if (data.candidates.length > 5) {
+                body.innerHTML += `<tr><td colspan="3" style="text-align:center">...and ${data.candidates.length - 5} more</td></tr>`;
+            }
+
+            document.getElementById("excelPreviewModal").style.display = "flex";
+        } else {
+            showToast("No valid candidates found. Check columns or empty rows.", "error");
+        }
+    } catch (e) {
+        console.error(e);
+        showToast("Error processing file", "error");
+    }
+    input.value = "";
+}
+
+async function confirmExcelImport() {
+    if (extractedCandidates.length === 0) {
+        closePreview();
+        return;
+    }
+    if (!activeCampaignId) {
+        showToast("Error: No campaign selected.", "error");
+        return;
+    }
+
+    const confirmBtn = document.querySelector('#excelPreviewModal .btn-primary');
+    let originalText = confirmBtn.innerHTML;
+    confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importing...';
+    confirmBtn.disabled = true;
+
+    try {
+        const response = await fetch("/api/candidates/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                campaign_id: activeCampaignId,
+                candidates: extractedCandidates
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            // Reload the list entirely to get the IDs for the new candidates
+            // (This ensures we can delete them immediately without refreshing page)
+            const candRes = await fetch(`/api/campaigns/${activeCampaignId}/candidates`);
+            const candData = await candRes.json();
+
+            // Clear and Re-render
+            const tbody = document.getElementById('candidates-list-body');
+            tbody.innerHTML = '';
+            candData.candidates.forEach(c => addCandidateRowToUI(c.name, c.phone, c.email, c.id));
+
+            // Show result message
+            if (result.skipped > 0) {
+                showToast(`Imported ${result.added}. Skipped ${result.skipped} duplicates.`, "warning");
+            } else {
+                showToast(`Successfully imported ${result.added} candidates!`, "success");
+            }
+
+            extractedCandidates = [];
+            closePreview();
+        } else {
+            showToast("Failed to save to database.", "error");
+        }
+    } catch (e) {
+        console.error(e);
+        showToast("Network Error", "error");
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.innerHTML = originalText;
+            confirmBtn.disabled = false;
+        }
+    }
+}
+// --- ADD MANUAL CANDIDATE (Fixed) ---
+async function addManualCandidate() {
+    if (!activeCampaignId) {
+        showToast("Please select a campaign first.", "error");
+        return;
+    }
+
+    const nameInput = document.getElementById('manual-name');
+    const phoneInput = document.getElementById('manual-phone');
+    const emailInput = document.getElementById('manual-email');
+
+    const name = nameInput.value.trim();
+    const phone = phoneInput.value.trim();
+    const email = emailInput.value.trim();
+
+    if (!name || !phone) {
+        showToast("Name and Phone are required", "error");
+        return;
+    }
+
+    const btn = document.querySelector('.btn-quick-add');
+    let originalText = btn.innerHTML;
+    if (btn) {
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+        btn.disabled = true;
+    }
+
+    try {
+        const response = await fetch("/api/candidates/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                campaign_id: activeCampaignId,
+                candidates: [{ name, phone, email }]
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            if (result.added === 0 && result.skipped > 0) {
+                showToast("Duplicate phone number. Not added.", "warning");
+            } else {
+                showToast("Candidate saved successfully!", "success");
+
+                // ✅ CRITICAL FIX: Refresh the list from DB to get the new ID
+                // We reuse the selectVapiCampaign logic to reload the active campaign's data
+                const currentTitle = document.getElementById('vapi-campaign-title').innerText;
+                const activeItem = document.querySelector('.vapi-list-item.active');
+                await selectVapiCampaign(activeItem, currentTitle, activeCampaignId);
+
+                // Clear inputs
+                nameInput.value = "";
+                phoneInput.value = "";
+                emailInput.value = "";
+            }
+        } else {
+            showToast(result.detail || "Failed to save candidate.", "error");
+        }
+    } catch (e) {
+        console.error(e);
+        showToast("Error connecting to server.", "error");
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+}
+
+// 4. Helper: Add Row to Table (The Missing Link)
+function addCandidateToTable(name, phone, email) {
+    const tbody = document.getElementById('candidates-list-body');
+    const countSpan = document.getElementById('candidate-count');
+
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td><strong>${name}</strong></td>
+        <td class="font-mono text-muted">${phone || '--'}</td>
+        <td class="text-muted">${email || '--'}</td>
+        <td style="text-align:right;">
+            <button class="btn-vapi-ghost" onclick="this.closest('tr').remove(); updateCount();" style="color: #ef4444; border:none;">
+                <i class="fa-solid fa-trash"></i>
+            </button>
+        </td>
+    `;
+
+    tbody.appendChild(row);
+    updateCount();
+}
+
+// 5. Helper: Update Count
+function updateCount() {
+    const tbody = document.getElementById('candidates-list-body');
+    const count = tbody.children.length;
+    document.getElementById('candidate-count').innerText = count;
+}
+
+// 6. Close Modal
+function closePreview() {
+    document.getElementById("excelPreviewModal").style.display = "none";
+}
+
+// 6. Close Modal Logic
+function closePreview() {
+    document.getElementById("excelPreviewModal").style.display = "none";
+}
+
+// 3. Render Table
+function renderCandidateTable() {
+    const tbody = document.getElementById('candidates-list-body');
+    const countSpan = document.getElementById('candidate-count');
+    tbody.innerHTML = '';
+
+    candidateList.forEach((c, index) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><strong>${c.name}</strong></td>
+            <td class="text-muted">${c.phone}</td>
+            <td class="text-muted">${c.email}</td>
+            <td style="text-align:right;">
+                <button class="btn-vapi-ghost" onclick="removeCandidate(${index})" style="color:#ef4444; border:none;">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    countSpan.textContent = candidateList.length;
+}
+
+function removeCandidate(index) {
+    candidateList.splice(index, 1);
+    renderCandidateTable();
+}
+
+
+async function generateScriptAI() {
+    const text = document.getElementById('context-text').value;
+    const fileInput = document.getElementById('context-file');
+
+    if (!text && fileInput.files.length === 0) {
+        showToast('Please provide text or upload a PDF', 'error');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('context_text', text);
+    if (fileInput.files.length > 0) {
+        formData.append('file', fileInput.files[0]);
+    }
+
+    showToast('AI is generating questions...', 'info');
+
+    try {
+        const response = await fetch('/api/generate-questions', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+
+        // Typewriter effect for the result
+        const textarea = document.getElementById('generated-script');
+        textarea.value = data.questions;
+        showToast('Script generated!', 'success');
+
+    } catch (e) {
+        showToast('Generation failed', 'error');
+    }
+}
+function closePreview() {
+    document.getElementById("excelPreviewModal").style.display = "none";
+}
+
+// --- SAVE EXTRACTED CANDIDATES (Import from Excel/CSV - Fixed) ---
+async function confirmExcelImport() {
+    if (extractedCandidates.length === 0) {
+        closePreview();
+        return;
+    }
+    if (!activeCampaignId) {
+        showToast("Error: No campaign selected.", "error");
+        closePreview();
+        return;
+    }
+
+    const confirmBtn = document.querySelector('#excelPreviewModal .btn-primary');
+    let originalText = "Import Selected";
+    if (confirmBtn) {
+        originalText = confirmBtn.innerHTML;
+        confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importing...';
+        confirmBtn.disabled = true;
+    }
+
+    try {
+        const response = await fetch("/api/candidates/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                campaign_id: activeCampaignId,
+                candidates: extractedCandidates
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            // ✅ CRITICAL FIX: Refresh the list from DB to get the new IDs
+            const currentTitle = document.getElementById('vapi-campaign-title').innerText;
+            const activeItem = document.querySelector('.vapi-list-item.active');
+            await selectVapiCampaign(activeItem, currentTitle, activeCampaignId);
+
+            const count = result.added;
+            showToast(`Successfully imported ${count} candidates!`, "success");
+
+            extractedCandidates = [];
+            closePreview();
+        } else {
+            showToast("Failed to save to database.", "error");
+        }
+    } catch (e) {
+        console.error(e);
+        showToast("Network Error: Could not save.", "error");
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.innerHTML = originalText;
+            confirmBtn.disabled = false;
+        }
+    }
+}
+
+async function saveCandidatesToDB(campaignId) {
+    const rows = document.querySelectorAll("#candidates-list-body tr");
+
+    let list = [];
+    rows.forEach(r => {
+        list.push({
+            name: r.children[0].innerText,
+            phone: r.children[1].innerText,
+            email: r.children[2].innerText
+        });
+    });
+
+    await fetch("/api/candidates/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            campaign_id: campaignId,
+            candidates: list
+        })
+    });
+
+    showToast("Candidates saved to database!", "success");
+}
+
+
+
+
+
+/* =========================================
+   SCRIPT BUILDER LOGIC (NEW)
+   ========================================= */
+
+// 1. Handle File Selection UI
+function handleFileSelect(input) {
+    const file = input.files[0];
+    const ui = document.getElementById('file-ui-content');
+    const zone = document.querySelector('.file-drop-zone');
+
+    if (file) {
+        // Change UI to show success
+        zone.classList.add('uploaded');
+        ui.innerHTML = `
+            <i class="fa-solid fa-file-pdf"></i>
+            <span style="color:white;">${file.name}</span>
+            <small>Ready to analyze</small>
+        `;
+    }
+}
+
+// 2. Toggle Manual Input Box
+function toggleManualAdd() {
+    const box = document.getElementById('manual-add-box');
+    if (box.style.display === 'none') {
+        box.style.display = 'flex';
+        document.getElementById('manual-q-input').focus();
+    } else {
+        box.style.display = 'none';
+    }
+}
+
+// 3. Append Manual Question to Main Editor
+function appendManualQuestion() {
+    const input = document.getElementById('manual-q-input');
+    const textarea = document.getElementById('generated-script');
+    const question = input.value.trim();
+
+    if (!question) return;
+
+    // Append with a newline
+    const currentText = textarea.value;
+    const prefix = currentText.length > 0 ? "\n" : "";
+    textarea.value = currentText + prefix + "- " + question;
+
+    // Reset input
+    input.value = '';
+    showToast("Question added to script", "success");
+}
+
+// 4. GENERATE AI (Updated to send Job Role)
+async function generateScriptAI() {
+    const role = document.getElementById('job-role').value;
+    const desc = document.getElementById('job-desc').value;
+    const fileInput = document.getElementById('context-file');
+
+    if (!role && !desc && fileInput.files.length === 0) {
+        showToast('Please enter a Job Role or Description', 'error');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('job_role', role); // Sent to Backend
+    formData.append('context_text', desc);
+    if (fileInput.files.length > 0) {
+        formData.append('file', fileInput.files[0]);
+    }
+
+    showToast('AI is generating questions...', 'info');
+
+    // Simulating loading state in textarea
+    const textarea = document.getElementById('generated-script');
+    textarea.value = "🤖 Analyzing Job Role...\nReading Context...\nGenerating Interview Questions...";
+
+    try {
+        const response = await fetch('/api/generate-questions', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+
+        // Update Textarea
+        textarea.value = data.questions;
+        showToast('Script generated successfully!', 'success');
+
+    } catch (e) {
+        showToast('Generation failed', 'error');
+        textarea.value = ""; // Clear loading text
+    }
+}
+/* --- MODERN SCRIPT BUILDER LOGIC --- */
+
+let sbUploadedFiles = [];
+
+// 1. Handle File Upload (Visual Tags)
+function handleSbFileUpload(input) {
+    if (input.files && input.files.length > 0) {
+        // Add new files to array
+        Array.from(input.files).forEach(file => {
+            sbUploadedFiles.push(file);
+        });
+        renderSbFiles();
+    }
+}
+
+function renderSbFiles() {
+    const container = document.getElementById('sb-file-list');
+    container.innerHTML = ''; // Clear current
+
+    sbUploadedFiles.forEach((file, index) => {
+        const tag = document.createElement('div');
+        tag.className = 'sb-file-tag';
+        tag.innerHTML = `
+            <i class="fa-solid fa-file-lines" style="color:var(--primary-500);"></i>
+            <span>${file.name}</span>
+            <i class="fa-solid fa-xmark" style="cursor:pointer; margin-left:4px;" onclick="removeSbFile(${index})"></i>
+        `;
+        container.appendChild(tag);
+    });
+}
+
+function removeSbFile(index) {
+    sbUploadedFiles.splice(index, 1);
+    renderSbFiles();
+}
+
+/* --- ADVANCED SCRIPT MODAL LOGIC --- */
+
+
+async function sbSaveScript() {
+    // 1. Validation: Ensure we have a generated blueprint
+    if (!currentGeneratedBlueprint) {
+        showToast("No blueprint to save. Generate one first!", "error");
+        return;
+    }
+
+    // 2. Validation: Ensure a campaign is selected
+    if (!activeCampaignId) {
+        showToast("No active campaign selected. Please create one first.", "error");
+        return;
+    }
+
+    const saveBtn = document.querySelector('.pm-footer .btn-primary');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving...';
+    saveBtn.disabled = true;
+
+    try {
+        const finalPackage = {
+            blueprint: currentGeneratedBlueprint,
+            config: {
+                saved_at: new Date().toISOString(),
+                engine: "Groq-Llama3",
+                status: "Script Confirmed" // Updated status
+            }
+        };
+
+        // 3. Send to Backend with REAL ID
+        const response = await fetch(`/api/campaigns/${activeCampaignId}/save-final`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(finalPackage)
+        });
+
+        if (response.ok) {
+            // A. Close the Modal
+            sbCloseModal();
+
+            // B. Show Global Toast
+            showToast("AI Agent Configured & Script Saved!", "success");
+
+            // C. Show the "Down Side" Success Box (in the script tab)
+            const successBox = document.getElementById('sb-saved-script');
+            if (successBox) {
+                successBox.style.display = 'block';
+                successBox.innerHTML = `
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <i class="fa-solid fa-robot" style="font-size:20px;"></i>
+                        <div>
+                            <strong>AI Agent Confirmed</strong><br>
+                            <span style="font-size:12px; opacity:0.8;">Blueprint stored in database. Ready for next steps.</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+        } else {
+            const errData = await response.json();
+            throw new Error(errData.detail || "Database save failed");
+        }
+
+    } catch (e) {
+        console.error(e);
+        showToast(`Error: ${e.message}`, "error");
+    } finally {
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+    }
+}
+
+// ... existing functions ...}
+
+// Ensure close function removes the class
+function sbCloseModal() {
+    document.getElementById('premiumScriptModal').classList.remove('active');
+}
+
+// 3. Close Modal
+function sbCloseModal() {
+    const modal = document.getElementById('premiumScriptModal');
+    modal.classList.remove('active');
+}
+
+/* --- REAL-TIME BLUEPRINT LOGIC (GROQ POWERED) --- */
+
+// Store the generated blueprint globally so we can save it later
+let currentGeneratedBlueprint = null;
+
+// --- FULL REPLACEMENT FOR: async function sbOpenModal() ---
+async function sbOpenModal() {
+    // 1. Select the generate button to update its state later
+    const generateBtn = document.querySelector('.sb-pro-btn');
+    const originalBtnText = generateBtn.innerHTML;
+
+    // --- STEP 1: BASIC VALIDATION ---
+
+    // A. Check Candidates (Source Data)
+    const candidateRows = document.querySelectorAll('#candidates-list-body tr:not(:has(.empty-state-row))');
+    if (candidateRows.length === 0) {
+        showToast("Validation Failed: Please add at least one candidate in 'Source Data'.", "error");
+        switchHrTab('tab-candidates', document.querySelector('.vapi-tab:nth-child(1)'));
+        return;
+    }
+
+    // B. Check Interview Steps (Mode & Duration)
+    const modeCard = document.querySelector('#mode-selection .step-card-compact.selected');
+    const timeCard = document.querySelector('#time-selection .step-card-horizontal.selected');
+
+    if (!modeCard || !timeCard) {
+        showToast("Validation Failed: Please select Interview Mode and Duration.", "error");
+        switchHrTab('tab-structure', document.querySelector('.vapi-tab:nth-child(2)'));
+        return;
+    }
+
+    const modeName = modeCard.querySelector('.step-title').innerText;
+
+    // C. Check AI Persona & Strictness
+    const agentCard = document.querySelector('#agent-selection .agent-card-modern.selected');
+    const strictCard = document.querySelector('#strict-selection .round-option-card.selected');
+
+    if (!agentCard || !strictCard) {
+        showToast("Validation Failed: Please select an Agent and Strictness level.", "error");
+        switchHrTab('tab-agent', document.querySelector('.vapi-tab:nth-child(3)'));
+        return;
+    }
+
+    // D. Check Script Inputs (Company & Role)
+    const company = document.getElementById('sb-company').value.trim();
+    const role = document.getElementById('sb-job-role').value.trim();
+    const desc = document.getElementById('sb-description').value.trim();
+
+    if (!company) return showToast("Validation Failed: Company Name is required.", "error");
+    if (!role) return showToast("Validation Failed: Job Role is required.", "error");
+
+
+    // --- STEP 2: GATHER CONFIGURATION DATA (NEW LOGIC) ---
+    // This uses the helper function 'getSelectedConfigData' defined in your code
+    const configData = getSelectedConfigData();
+
+    // Strict Validation for Technical/Mixed Rounds
+    if (modeName.includes('Technical') || modeName.includes('Mixed')) {
+        if (!configData.domain) {
+            showToast("Validation Failed: Please select a Professional Domain (e.g., Frontend, Data Science).", "error");
+            // Force switch to structure tab if they are on another tab
+            switchHrTab('tab-structure', document.querySelector('.vapi-tab:nth-child(2)'));
+            return;
+        }
+    }
+
+    // --- STEP 3: PREPARE PAYLOAD & CALL API ---
+
+    generateBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Generating Blueprint...';
+    generateBtn.disabled = true;
+
+    try {
+        const payload = {
+            // Basic Info
+            company_name: company,
+            job_role: role,
+            description: desc,
+            candidate_count: candidateRows.length,
+
+            // Agent Config
+            agent_persona: agentCard.querySelector('.agent-name').innerText,
+            strictness: strictCard.querySelector('.card-title').innerText,
+            interview_mode: modeName,
+            duration: timeCard.querySelector('.step-title').innerText,
+
+            // NEW: Detailed Configuration
+            job_domain: configData.domain,           // e.g. "DataScience"
+            tech_stack: configData.skills.join(', '), // e.g. "Python, TensorFlow, SQL"
+            hr_focus: configData.hrFocus.join(', ')   // e.g. "Cultural Fit, Stability"
+        };
+
+        const response = await fetch('/api/generate-blueprint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) throw new Error("AI Generation Failed");
+
+        const blueprint = await response.json();
+        currentGeneratedBlueprint = blueprint; // Store globally for final save
+
+        // Render result to the modal (using your existing render function)
+        renderBlueprintToModal(blueprint, payload);
+
+        // Open the modal
+        document.getElementById('premiumScriptModal').classList.add('active');
+
+    } catch (error) {
+        console.error("Blueprint Error:", error);
+        showToast("Failed to generate blueprint. Check console.", "error");
+    } finally {
+        generateBtn.innerHTML = originalBtnText;
+        generateBtn.disabled = false;
+    }
+}
+function renderBlueprintToModal(blueprint, payload) {
+    // 1. Fill Top Metrics
+    document.getElementById('bp-candidate-count').innerText = payload.candidate_count;
+    document.getElementById('bp-persona-name').innerText = payload.agent_persona;
+    document.getElementById('bp-interview-mode').innerText = payload.interview_mode; // Fixed Key
+    document.getElementById('bp-total-time').innerText = blueprint.estimated_hours || "0";
+    // If you have a duration element in the modal, update it too
+    const durEl = document.getElementById('bp-duration');
+    if (durEl) durEl.innerText = payload.duration;
+
+    // 2. Fill System Prompt (The Logic Box)
+    // Escaping HTML to prevent injection, though innerText is safer usually
+    const sysPrompt = blueprint.system_prompt || "System prompt could not be generated.";
+    const logicBox = document.querySelector('.system-logic-box');
+    if (logicBox) {
+        // Simple formatting to highlight keys if you want, or just dump text
+        logicBox.innerHTML = `<div style="color:#a1a1aa; white-space: pre-wrap;">${sysPrompt}</div>`;
+    }
+
+    // 3. Render Script Phases (Cards)
+    const container = document.getElementById('blueprint-script-container');
+    container.innerHTML = ''; // Clear previous
+
+    if (blueprint.phases && Array.isArray(blueprint.phases)) {
+        blueprint.phases.forEach((phase, index) => {
+            let dialogueHTML = '';
+
+            if (phase.questions) {
+                phase.questions.forEach(q => {
+                    const isSys = q.speaker === 'SYS';
+                    const style = isSys ? 'color:var(--text-tertiary); font-style:italic;' : '';
+                    const speakerLabel = isSys ? '<i class="fa-solid fa-microchip"></i>' : q.speaker;
+
+                    dialogueHTML += `
+                        <div class="dialogue-line">
+                            <div class="speaker">${speakerLabel}</div>
+                            <div class="text" style="${style}">${q.text}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            // Add a visual accent to the second card just for style
+            const borderStyle = index === 1 ? 'border-left: 3px solid var(--primary-500);' : '';
+
+            const card = `
+                <div class="script-phase-card" style="${borderStyle}">
+                    <div class="script-phase-header">
+                        <span class="phase-name">${phase.name}</span>
+                        <span class="phase-time">${phase.time_limit}</span>
+                    </div>
+                    ${dialogueHTML}
+                </div>
+            `;
+            container.innerHTML += card;
+        });
+    } else {
+        container.innerHTML = '<div style="padding:20px; color:gray;">No phases generated.</div>';
+    }
+}
+
+
+/* --- REALISTIC REPORTS LOGIC --- */
+
+// Hook into the tab switch function to trigger report loading
+const originalSwitchHrTab = window.switchHrTab;
+window.switchHrTab = function (tabId, tabElement) {
+    originalSwitchHrTab(tabId, tabElement); // Call original
+
+    // If clicking Reports tab, render data
+    if (tabId === 'tab-reports') {
+        renderRealisticReports();
+    }
+};
+
+/* --- UPDATED: Render Reports Tab (New Design) --- */
+async function renderRealisticReports() {
+    // 1. Target the NEW table body inside #tab-reports
+    const tbody = document.querySelector('#tab-reports .sd-table tbody');
+
+    // Safety check
+    if (!tbody) return;
+
+    // Show Loading State
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-tertiary);"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Analytics...</td></tr>';
+
+    if (!activeCampaignId) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-tertiary);">Please select a campaign to view reports.</td></tr>';
+        return;
+    }
+
+    try {
+        // 2. Fetch Real Data
+        const res = await fetch(`/api/campaigns/${activeCampaignId}/candidates`);
+        const data = await res.json();
+
+        tbody.innerHTML = ''; // Clear loading
+
+        if (!data.candidates || data.candidates.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-tertiary);">No interview data available yet.</td></tr>';
+
+            // Reset KPIs to 0
+            if (document.getElementById('stat-selected')) document.getElementById('stat-selected').innerText = "0";
+            if (document.getElementById('stat-rejected')) document.getElementById('stat-rejected').innerText = "0";
+            if (document.getElementById('stat-pending')) document.getElementById('stat-pending').innerText = "0";
+            return;
+        }
+
+        // 3. Process Data & KPIs
+        let stats = { selected: 0, rejected: 0, pending: 0 };
+
+        data.candidates.forEach(c => {
+            // Determine Status Logic
+            const status = c.status || "Pending";
+            const score = c.score ? `${c.score}/10` : "-";
+
+            let badgeClass = "badge-neutral";
+            let scoreStyle = "color:var(--text-tertiary);";
+            let statusText = "Under Review";
+
+            if (status === "Selected") {
+                badgeClass = "badge-success";
+                scoreStyle = "color:#10b981; font-weight:700;";
+                statusText = "Selected";
+                stats.selected++;
+            } else if (status === "Rejected") {
+                badgeClass = "badge-danger";
+                scoreStyle = "color:#ef4444; font-weight:700;";
+                statusText = "Rejected";
+                stats.rejected++;
+            } else {
+                badgeClass = "badge-warning";
+                statusText = "Pending";
+                stats.pending++;
+            }
+
+            const dateStr = c.created_at ? new Date(c.created_at).toLocaleDateString() : "Today";
+
+            // 4. Create the New Row Style (Stacked Name/Email)
+            const row = `
+                <tr>
+                    <td>
+                        <strong style="color:white; font-size:13px;">${c.name}</strong>
+                        <br>
+                        <span style="font-size:11px; color:var(--text-tertiary);">${c.email || '-'}</span>
+                    </td>
+                    <td><span class="badge ${badgeClass}">${statusText}</span></td>
+                    <td><span style="${scoreStyle}">${score}</span></td>
+                    <td style="color:var(--text-tertiary); font-size:12px;">${dateStr}</td>
+                </tr>
+            `;
+            tbody.innerHTML += row;
+        });
+
+        // 5. Update KPI Cards (Using the IDs we added back to HTML)
+        if (document.getElementById('stat-selected')) document.getElementById('stat-selected').innerText = stats.selected;
+        if (document.getElementById('stat-rejected')) document.getElementById('stat-rejected').innerText = stats.rejected;
+        if (document.getElementById('stat-pending')) document.getElementById('stat-pending').innerText = stats.pending;
+
+    } catch (e) {
+        console.error("Reports Error:", e);
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#ef4444;">Failed to load data.</td></tr>';
+    }
+}
+
+
+/* --- HELPER: Add Row to Source Data UI --- */
+function addCandidateRowToUI(name, phone, email, id = null) {
+    const tbody = document.getElementById('candidates-list-body');
+
+    // Clear "Empty State" row if it exists
+    const emptyState = tbody.querySelector('.empty-state-row');
+    if (emptyState) {
+        tbody.innerHTML = '';
+    }
+
+    const row = document.createElement('tr');
+
+    // Store the Database ID in the row (useful for debugging/access)
+    if (id) row.dataset.id = id;
+
+    // Determine Delete Action:
+    // If ID exists -> Call API. If no ID (temp) -> Just remove from UI.
+    const deleteAction = id
+        ? `deleteCandidateAPI('${id}', this)`
+        : `this.closest('tr').remove(); updateCandidateCount();`;
+
+    row.innerHTML = `
+        <td style="font-weight:600; color:white;">${name}</td>
+        <td style="color:var(--text-tertiary); font-family:'Space Grotesk', monospace;">${phone || '--'}</td>
+        <td style="color:var(--text-tertiary);">${email || '--'}</td>
+        <td style="text-align:right;">
+            <button class="btn-text-only" onclick="${deleteAction}" style="color: #ef4444; margin-left:auto;">
+                <i class="fa-solid fa-trash"></i>
+            </button>
+        </td>
+    `;
+
+    tbody.appendChild(row);
+    updateCandidateCount();
+}
+// Ensure the count update logic is correct
+function updateCandidateCount() {
+    const tbody = document.getElementById('candidates-list-body');
+    // Count rows that are NOT the empty state
+    const rows = tbody.querySelectorAll('tr:not(:has(.empty-state-row))');
+    const countSpan = document.getElementById('candidate-count');
+    if (countSpan) countSpan.innerText = rows.length;
+}
+
+function updateCandidateCount() {
+    const count = document.querySelectorAll('#candidates-list-body tr').length;
+    document.getElementById('candidate-count').innerText = count;
+}
+
+
+// --- DELETE CAMPAIGN LOGIC ---
+async function deleteCampaign(event, campaignId, type) {
+    // 1. Prevent clicking the parent div (which would select the campaign)
+    event.stopPropagation();
+
+    // 2. Confirm Dialog
+    if (!confirm("Are you sure you want to delete this campaign? This cannot be undone.")) {
+        return;
+    }
+
+    try {
+        // 3. Call Backend
+        const response = await fetch(`/api/campaigns/${campaignId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            showToast("Campaign deleted successfully", "success");
+
+            // 4. Reload List
+            // If the deleted campaign was active, this refresh handles clearing the view
+            await loadUserCampaigns(type);
+
+            // If we deleted the active one, clear the ID
+            if (activeCampaignId === campaignId) {
+                activeCampaignId = null;
+            }
+        } else {
+            showToast("Failed to delete campaign", "error");
+        }
+    } catch (e) {
+        console.error(e);
+        showToast("Error deleting campaign", "error");
+    }
+}
+
+
+async function loadDashboardRealData() {
+    try {
+        const res = await fetch('/api/dashboard-stats');
+        const data = await res.json();
+
+        if (data.error) return;
+
+        // Update KPI Cards
+        const totalEl = document.getElementById('dash-total-candidates');
+        const activeEl = document.getElementById('dash-active-count');
+        const doneEl = document.getElementById('dash-interviews-done');
+
+        if (totalEl) totalEl.innerText = data.total_candidates;
+        if (activeEl) activeEl.innerText = data.active_candidates;
+        if (doneEl) doneEl.innerText = data.interviews_done;
+    } catch (e) { console.error(e); }
+}
+
+
+// --- LIVE ACTIVITY TABLE ---
+async function loadLiveActivityTable() {
+    const tbody = document.getElementById('dashboard-live-body');
+    if (!tbody) return;
+
+    try {
+        const res = await fetch('/api/dashboard/live-activity');
+        const data = await res.json();
+
+        if (!data.activity || data.activity.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:gray;">No live activity.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '';
+        data.activity.forEach(c => {
+            // Logic for badge colors
+            let badgeClass = 'badge-neutral';
+            if (c.display_status.includes('Active')) badgeClass = 'badge-primary';
+            if (c.display_status.includes('Analyzed')) badgeClass = 'badge-success';
+            if (c.display_status.includes('Dialing')) badgeClass = 'badge-warning';
+
+            // Initials generator
+            const initials = c.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+
+            const row = `
+                <tr>
+                    <td>
+                        <div class="flex-center" style="justify-content: flex-start; gap: 12px;">
+                            <div class="avatar" style="width: 28px; height: 28px; font-size: 10px;">${initials}</div>
+                            <span style="font-weight: 500;">${c.name}</span>
+                        </div>
+                    </td>
+                    <td>Candidate</td>
+                    <td><span class="badge ${badgeClass}">${c.display_status}</span></td>
+                    <td class="font-mono text-muted">${c.duration}</td>
+                    <td class="text-muted">Just now</td>
+                </tr>
+            `;
+            tbody.innerHTML += row;
+        });
+    } catch (e) { console.error(e); }
+}
+
+// --- ALL CANDIDATES TABLE ---
+async function loadAllCandidatesTable() {
+    const tbody = document.getElementById('all-candidates-body');
+    if (!tbody) return;
+
+    try {
+        const res = await fetch('/api/candidates/all');
+        const data = await res.json();
+
+        if (!data.candidates || data.candidates.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;">No candidates found.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '';
+        data.candidates.forEach(c => {
+            const row = `
+                <tr>
+                    <td><strong>${c.name}</strong></td>
+                    <td class="font-mono text-muted">${c.phone}</td>
+                    <td>General Application</td>
+                    <td><span class="badge badge-neutral">${c.status}</span></td>
+                    <td class="font-mono text-muted">-</td>
+                    <td>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="icon-btn btn-sm"><i class="fa-solid fa-phone"></i></button>
+                            <button class="icon-btn btn-sm"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            tbody.innerHTML += row;
+        });
+    } catch (e) { console.error(e); }
+}
+
+// --- LAUNCH SIMULATION ---
+async function launchCurrentCampaign() {
+    // Check if a campaign is actually selected
+    if (!activeCampaignId) {
+        showToast("No campaign selected to launch", "error");
+        return;
+    }
+
+    // 1. Visual Feedback on Button
+    const btn = document.querySelector('.btn-vapi-launch');
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Launching...';
+
+    // 2. Simulate delay
+    setTimeout(() => {
+        showToast("🚀 Campaign Launched! Calls initiated...", "success");
+        btn.innerHTML = originalContent;
+
+        // 3. Switch View to Dashboard to see "Action"
+        const dashboardLink = document.querySelector('.nav-link[onclick*="dashboard"]');
+        if (dashboardLink) dashboardLink.click();
+
+        // 4. Refresh Data to show new "Active" statuses
+        setTimeout(() => {
+            loadDashboardRealData();
+            loadLiveActivityTable();
+            loadAllCandidatesTable();
+        }, 800);
+
+    }, 1500);
+}
+
+
+
+
+/* --- NEW AI PERSONA TAB FUNCTIONS --- */
+
+let currentAudio = null;
+let currentPlayButtonIcon = null;
+
+// 1. Handle Voice Audio Preview
+function handleVoicePlay(event, buttonElement, audioUrl) {
+    // Stop propagation so we don't select the card itself when clicking play
+    event.stopPropagation();
+
+    const icon = buttonElement.querySelector('i');
+    const avatarContainer = buttonElement.closest('.voice-avatar-container');
+
+    // If current audio is playing, pause it and reset its icon
+    if (currentAudio && !currentAudio.paused) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+        if (currentPlayButtonIcon) {
+            currentPlayButtonIcon.classList.replace('fa-stop', 'fa-play');
+            currentPlayButtonIcon.closest('.voice-avatar-container').classList.remove('playing');
+        }
+        // If we clicked the same button that was playing, just stop and return
+        if (currentPlayButtonIcon === icon) {
+            currentAudio = null;
+            currentPlayButtonIcon = null;
+            return;
+        }
+    }
+
+    // Play new audio
+    // Note: Since we don't have real URLs, I'm using a short placeholder sound.
+    // Replace 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' with actual voice samples later.
+    currentAudio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+    currentAudio.volume = 0.5;
+
+    currentAudio.play().then(() => {
+        icon.classList.replace('fa-play', 'fa-stop');
+        avatarContainer.classList.add('playing');
+        currentPlayButtonIcon = icon;
+    }).catch(e => showToast("Could not play audio preview", "error"));
+
+    // Reset icon when audio finishes
+    currentAudio.onended = () => {
+        icon.classList.replace('fa-stop', 'fa-play');
+        avatarContainer.classList.remove('playing');
+        currentAudio = null;
+        currentPlayButtonIcon = null;
+    };
+}
+
+
+// 2. Handle "See More Voices" Toggle
+function toggleSeeMoreVoices(button) {
+    const hiddenRows = document.querySelectorAll('.hidden-voice-row');
+    const isExpanded = button.getAttribute('data-expanded') === 'true';
+    const icon = button.querySelector('i');
+    const text = button.querySelector('span');
+
+    if (isExpanded) {
+        // Collapse
+        hiddenRows.forEach(row => row.style.display = 'none');
+        button.setAttribute('data-expanded', 'false');
+        icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+        text.textContent = 'See More Voices';
+    } else {
+        // Expand
+        hiddenRows.forEach(row => row.style.display = 'flex'); // Use flex because the parents are flex containers
+        button.setAttribute('data-expanded', 'true');
+        icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+        text.textContent = 'Show Less';
+    }
+}
+
+
+// 3. Updated Selection function for the new card style
+// We need a slightly different selection function because the class names changed to .voice-card-eleven
+function selectVoiceCard(element) {
+    // 1. Find container
+    const container = document.getElementById('voice-selection-grid');
+    // 2. Remove selected from all
+    container.querySelectorAll('.voice-card-eleven').forEach(card => card.classList.remove('selected'));
+    // 3. Add selected to clicked
+    element.classList.add('selected');
+}
+
+
+
+/* --- UPDATED SELECTION LOGIC --- */
+
+// 1. Select AGENT (New Design)
+function selectAgent(element) {
+    // Remove selected from siblings in the grid
+    const container = document.getElementById('agent-selection');
+    container.querySelectorAll('.agent-card-modern').forEach(c => c.classList.remove('selected'));
+    // Add to clicked
+    element.classList.add('selected');
+}
+
+// 2. Select VOICE (ElevenLabs Design)
+function selectVoice(element) {
+    const container = document.getElementById('voice-selection-grid');
+    container.querySelectorAll('.voice-card-el').forEach(c => c.classList.remove('selected'));
+    element.classList.add('selected');
+}
+
+// 3. Play Audio Preview (Mock)
+function playVoicePreview(event, button) {
+    event.stopPropagation(); // Don't select the card
+
+    const icon = button.querySelector('i');
+
+    // Simple toggle logic
+    if (icon.classList.contains('fa-play')) {
+        // Reset all other icons first
+        document.querySelectorAll('.el-play-overlay i').forEach(i => i.classList.replace('fa-stop', 'fa-play'));
+
+        icon.classList.replace('fa-play', 'fa-stop');
+        // Mock finish after 2 seconds
+        setTimeout(() => {
+            icon.classList.replace('fa-stop', 'fa-play');
+        }, 2000);
+    } else {
+        icon.classList.replace('fa-stop', 'fa-play');
+    }
+}
+
+// 4. Toggle "See More"
+function toggleSeeMoreVoices(btn) {
+    const hidden = document.querySelectorAll('.hidden-voice-row');
+    const isExpanded = btn.getAttribute('data-expanded') === 'true';
+
+    hidden.forEach(row => row.style.display = isExpanded ? 'none' : 'flex');
+
+    btn.setAttribute('data-expanded', !isExpanded);
+    btn.querySelector('span').innerText = isExpanded ? 'See More Voices' : 'Show Less';
+    btn.querySelector('i').classList.toggle('fa-chevron-down');
+    btn.querySelector('i').classList.toggle('fa-chevron-up');
+}
+
+
+// --- LANGUAGE SELECTION LOGIC ---
+function selectLanguage(element) {
+    // 1. Find container
+    const container = document.getElementById('lang-selection');
+
+    // 2. Remove selected class from siblings
+    container.querySelectorAll('.lang-card').forEach(card => card.classList.remove('selected'));
+
+    // 3. Add to clicked
+    element.classList.add('selected');
+
+    // Optional: Log selection
+    console.log("Selected Language:", element.querySelector('.lang-name').innerText);
+}
+
+// --- STRICTNESS SELECTION LOGIC ---
+function selectStrictness(element) {
+    // 1. Find container
+    const container = document.getElementById('strict-selection');
+
+    // 2. Remove selected class from siblings
+    container.querySelectorAll('.round-option-card').forEach(card => card.classList.remove('selected'));
+
+    // 3. Add to clicked
+    element.classList.add('selected');
+
+    // Optional: Log selection
+    console.log("Selected Strictness:", element.querySelector('.card-title').innerText);
+}
+
+function selectOption(element, containerId) {
+    // 1. Find the container (mode-selection or time-selection)
+    const container = document.getElementById(containerId);
+
+    // 2. Remove 'selected' from ALL cards inside this container
+    const siblings = container.querySelectorAll('.step-card-compact, .step-card-horizontal, .round-option-card');
+    siblings.forEach(card => card.classList.remove('selected'));
+
+    // 3. Add 'selected' to the clicked card
+    element.classList.add('selected');
+
+    // --- NEW LOGIC: SHOW/HIDE TECH CONFIG ---
+    if (containerId === 'mode-selection') {
+        const titleElement = element.querySelector('.step-title, .card-title');
+        const titleText = titleElement ? titleElement.innerText : '';
+        const techSection = document.getElementById('tech-sub-options');
+
+        // Show if Technical or Mixed
+        if (titleText.includes('Technical') || titleText.includes('Mixed')) {
+            techSection.style.display = 'block';
+        } else {
+            techSection.style.display = 'none';
+        }
+    }
+}
+
+async function deleteCandidateAPI(id, btnElement) {
+    if (!confirm("Delete this candidate permanently?")) return;
+
+    // Visual feedback
+    const originalContent = btnElement.innerHTML;
+    btnElement.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i>';
+    btnElement.disabled = true;
+
+    try {
+        const res = await fetch(`/api/candidates/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+            // Remove row from UI
+            const row = btnElement.closest('tr');
+            row.style.opacity = '0';
+            setTimeout(() => {
+                row.remove();
+                updateCandidateCount();
+            }, 300);
+            showToast("Candidate deleted", "success");
+        } else {
+            showToast("Failed to delete", "error");
+            btnElement.innerHTML = originalContent;
+            btnElement.disabled = false;
+        }
+    } catch (e) {
+        console.error(e);
+        showToast("Network Error", "error");
+        btnElement.innerHTML = originalContent;
+        btnElement.disabled = false;
+    }
+}
+
+
+// --- NEW TECHNICAL DRILL-DOWN LOGIC ---
+
+// 1. Handle Domain Selection
+function selectDomain(element, value) {
+    // Remove active class from siblings
+    const parent = element.parentElement;
+    parent.querySelectorAll('.domain-card').forEach(el => el.classList.remove('active'));
+
+    // Activate clicked
+    element.classList.add('active');
+    document.getElementById('selected-domain').value = value;
+
+    // Optional: Pre-fill some tags based on selection
+    suggestTags(value);
+}
+
+// 2. Suggest Tags based on Domain (Optional Helper)
+function suggestTags(domain) {
+    const container = document.getElementById('tech-tags-container');
+    container.innerHTML = ''; // Clear existing
+
+    let suggestions = [];
+    if (domain === 'Frontend') suggestions = ['React', 'JavaScript', 'CSS', 'HTML'];
+    if (domain === 'Backend') suggestions = ['Python', 'Node.js', 'SQL', 'API Design'];
+    if (domain === 'Full Stack') suggestions = ['React', 'Node.js', 'MongoDB', 'AWS'];
+    if (domain === 'Mobile') suggestions = ['Flutter', 'Dart', 'iOS', 'Android'];
+    if (domain === 'Data') suggestions = ['Python', 'Pandas', 'SQL', 'Machine Learning'];
+    if (domain === 'DevOps') suggestions = ['Docker', 'Kubernetes', 'AWS', 'CI/CD'];
+
+    suggestions.forEach(tag => {
+        addTagHTML(tag);
+    });
+}
+
+// 3. Add Custom Tag (Input)
+function addCustomTag() {
+    const input = document.getElementById('tech-stack-input');
+    const val = input.value.trim();
+    if (val) {
+        addTagHTML(val);
+        input.value = '';
+    }
+}
+
+// 3b. Helper to create HTML
+function addTagHTML(text) {
+    const container = document.getElementById('tech-tags-container');
+    const tag = document.createElement('span');
+    tag.className = 'tech-tag';
+    tag.innerHTML = `${text} <i class="fa-solid fa-xmark"></i>`;
+    tag.onclick = function () { this.remove(); };
+    container.appendChild(tag);
+}
+
+// 4. Handle Enter Key in Input
+document.addEventListener('DOMContentLoaded', () => {
+    const techInput = document.getElementById('tech-stack-input');
+    if (techInput) {
+        techInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addCustomTag();
+        });
+    }
+});
+// --- COMPREHENSIVE SKILLS DATABASE (12 ROLES) ---
+const techSkillsDB = {
+    'Frontend': [
+        { name: 'React.js', icon: 'fa-brands fa-react', color: '#61DAFB' },
+        { name: 'Next.js', icon: 'fa-solid fa-n', color: '#ffffff' },
+        { name: 'Vue.js', icon: 'fa-brands fa-vuejs', color: '#4FC08D' },
+        { name: 'TypeScript', icon: 'fa-solid fa-code', color: '#3178C6' },
+        { name: 'Tailwind CSS', icon: 'fa-solid fa-wind', color: '#38B2AC' },
+        { name: 'HTML5/CSS3', icon: 'fa-brands fa-html5', color: '#E34F26' },
+        { name: 'Redux', icon: 'fa-solid fa-diagram-project', color: '#764ABC' }
+    ],
+    'Backend': [
+        { name: 'Node.js', icon: 'fa-brands fa-node', color: '#339933' },
+        { name: 'Python', icon: 'fa-brands fa-python', color: '#3776AB' },
+        { name: 'Java', icon: 'fa-brands fa-java', color: '#007396' },
+        { name: 'GoLang', icon: 'fa-brands fa-golang', color: '#00ADD8' },
+        { name: 'PostgreSQL', icon: 'fa-solid fa-database', color: '#336791' },
+        { name: 'MongoDB', icon: 'fa-solid fa-leaf', color: '#47A248' },
+        { name: 'Docker', icon: 'fa-brands fa-docker', color: '#2496ED' }
+    ],
+    'FullStack': [
+        { name: 'MERN Stack', icon: 'fa-solid fa-layer-group', color: '#00D8FF' },
+        { name: 'Next.js Full', icon: 'fa-solid fa-n', color: '#ffffff' },
+        { name: 'Django+React', icon: 'fa-brands fa-python', color: '#092E20' },
+        { name: 'Spring+Angular', icon: 'fa-brands fa-java', color: '#6DB33F' },
+        { name: 'Supabase', icon: 'fa-solid fa-bolt', color: '#3ECF8E' }
+    ],
+    'Mobile': [
+        { name: 'Flutter', icon: 'fa-solid fa-mobile', color: '#02569B' },
+        { name: 'React Native', icon: 'fa-brands fa-react', color: '#61DAFB' },
+        { name: 'Swift (iOS)', icon: 'fa-brands fa-apple', color: '#F05138' },
+        { name: 'Kotlin (Android)', icon: 'fa-brands fa-android', color: '#3DDB85' }
+    ],
+    'GenerativeAI': [
+        { name: 'LangChain', icon: 'fa-solid fa-link', color: '#1C3C3C' },
+        { name: 'OpenAI API', icon: 'fa-solid fa-robot', color: '#10A37F' },
+        { name: 'HuggingFace', icon: 'fa-solid fa-face-smile', color: '#FFD21E' },
+        { name: 'Vector DBs', icon: 'fa-solid fa-database', color: '#E10098' },
+        { name: 'RAG Pipelines', icon: 'fa-solid fa-diagram-project', color: '#8b5cf6' }
+    ],
+    'AIMLEngineer': [
+        { name: 'PyTorch', icon: 'fa-solid fa-fire', color: '#EE4C2C' },
+        { name: 'TensorFlow', icon: 'fa-solid fa-brain', color: '#FF6F00' },
+        { name: 'Scikit-learn', icon: 'fa-solid fa-calculator', color: '#F7931E' },
+        { name: 'Computer Vision', icon: 'fa-solid fa-eye', color: '#3b82f6' },
+        { name: 'NLP', icon: 'fa-solid fa-comments', color: '#10b981' }
+    ],
+    'DataEngineer': [
+        { name: 'Apache Spark', icon: 'fa-solid fa-bolt', color: '#E25A1C' },
+        { name: 'Kafka', icon: 'fa-solid fa-envelope', color: '#231F20' },
+        { name: 'Snowflake', icon: 'fa-solid fa-snowflake', color: '#29B5E8' },
+        { name: 'SQL (Adv)', icon: 'fa-solid fa-database', color: '#F29111' },
+        { name: 'AWS Glue', icon: 'fa-brands fa-aws', color: '#FF9900' }
+    ],
+    'DataAnalyst': [
+        { name: 'SQL', icon: 'fa-solid fa-database', color: '#F29111' },
+        { name: 'Tableau', icon: 'fa-solid fa-chart-simple', color: '#E97627' },
+        { name: 'PowerBI', icon: 'fa-solid fa-chart-column', color: '#F2C811' },
+        { name: 'Excel', icon: 'fa-solid fa-table', color: '#217346' },
+        { name: 'Python (Pandas)', icon: 'fa-brands fa-python', color: '#150458' }
+    ],
+    'DevOps': [
+        { name: 'AWS', icon: 'fa-brands fa-aws', color: '#FF9900' },
+        { name: 'Docker', icon: 'fa-brands fa-docker', color: '#2496ED' },
+        { name: 'Kubernetes', icon: 'fa-solid fa-dharmachakra', color: '#326CE5' },
+        { name: 'Terraform', icon: 'fa-solid fa-code', color: '#7B42BC' },
+        { name: 'Jenkins (CI/CD)', icon: 'fa-brands fa-jenkins', color: '#D24939' }
+    ],
+    'Product': [
+        { name: 'Agile / Scrum', icon: 'fa-solid fa-rotate', color: '#0052CC' },
+        { name: 'Jira', icon: 'fa-brands fa-jira', color: '#0052CC' },
+        { name: 'Roadmapping', icon: 'fa-solid fa-map', color: '#FF5630' },
+        { name: 'Data Analytics', icon: 'fa-solid fa-chart-bar', color: '#36B37E' }
+    ],
+    'UIUX': [
+        { name: 'Figma', icon: 'fa-brands fa-figma', color: '#F24E1E' },
+        { name: 'Adobe XD', icon: 'fa-solid fa-pen-nib', color: '#FF61F6' },
+        { name: 'Prototyping', icon: 'fa-solid fa-object-group', color: '#A259FF' },
+        { name: 'User Research', icon: 'fa-solid fa-users', color: '#10B981' }
+    ],
+    'QA': [
+        { name: 'Selenium', icon: 'fa-solid fa-robot', color: '#43B02A' },
+        { name: 'Cypress', icon: 'fa-solid fa-eye', color: '#17202C' },
+        { name: 'Java / Python', icon: 'fa-solid fa-code', color: '#3776AB' },
+        { name: 'API Testing', icon: 'fa-solid fa-paper-plane', color: '#FF6C37' }
+    ]
+};
+
+// --- 2. UPDATED CLICK HANDLER WITH COLORS ---
+function handleDomainClick(element, domainKey) {
+    // UI Selection
+    document.querySelectorAll('.domain-card-big').forEach(el => el.classList.remove('active'));
+    element.classList.add('active');
+
+    // Save Value
+    document.getElementById('selected-domain').value = domainKey;
+    document.getElementById('tech-stack-section').style.display = 'block';
+
+    // Populate Tech Stack
+    const container = document.getElementById('tech-options-container');
+    container.innerHTML = '';
+    const skills = techSkillsDB[domainKey] || [];
+
+    skills.forEach(skill => {
+        const box = document.createElement('div');
+        box.className = 'tech-option-box';
+
+        // --- KEY CHANGE: Inject CSS Variables for color ---
+        // We set --skill-color locally so CSS can use it for borders/icons
+        box.style.setProperty('--skill-color', skill.color);
+        box.style.setProperty('--skill-shadow', `${skill.color}40`); // 40 = 25% opacity hex
+
+        box.innerHTML = `<i class="${skill.icon}"></i> <span>${skill.name}</span>`;
+        box.onclick = () => box.classList.toggle('selected');
+        container.appendChild(box);
+    });
+}
+
+function selectOption(element, containerId) {
+    // 1. Find the container (mode-selection or time-selection)
+    const container = document.getElementById(containerId);
+
+    // 2. Remove 'selected' from ALL cards inside this container
+    const siblings = container.querySelectorAll('.step-card-compact, .step-card-horizontal, .round-option-card');
+    siblings.forEach(card => card.classList.remove('selected'));
+
+    // 3. Add 'selected' to the clicked card
+    element.classList.add('selected');
+
+    // --- NEW LOGIC: SHOW/HIDE TECH CONFIG ---
+    if (containerId === 'mode-selection') {
+        const titleElement = element.querySelector('.step-title, .card-title');
+        const titleText = titleElement ? titleElement.innerText : '';
+        const techSection = document.getElementById('role-configuration-section'); // Fixed ID based on your HTML
+        const techWrapper = document.getElementById('tech-domain-wrapper');
+        const hrWrapper = document.getElementById('hr-focus-wrapper');
+
+        // Always show the main container when a selection is made
+        if (techSection) techSection.style.display = 'block';
+
+        // Reset visibility of inner wrappers
+        if (techWrapper) techWrapper.style.display = 'none';
+        if (hrWrapper) hrWrapper.style.display = 'none';
+
+        // Conditional Display
+        if (titleText.includes('Technical')) {
+            if (techWrapper) techWrapper.style.display = 'block';
+        } else if (titleText.includes('HR Round')) {
+            if (hrWrapper) hrWrapper.style.display = 'block';
+        } else if (titleText.includes('Mixed')) {
+            if (techWrapper) techWrapper.style.display = 'block';
+            if (hrWrapper) hrWrapper.style.display = 'block';
+        }
+    }
+}
+
+
+
+function toggleHrFocus(element, type) {
+    element.classList.toggle('selected');
+}
+
+// 4. UPDATED GATHER DATA FUNCTION
+function getSelectedConfigData() {
+    const modeCard = document.querySelector('#mode-selection .step-card-compact.selected');
+    const modeName = modeCard ? modeCard.querySelector('.step-title').innerText : '';
+
+    let data = { domain: '', skills: [], hrFocus: [] };
+
+    // Get Tech Data if Tech or Mixed
+    if (modeName.includes('Technical') || modeName.includes('Mixed')) {
+        data.domain = document.getElementById('selected-domain').value;
+        document.querySelectorAll('.tech-option-box.selected').forEach(box => {
+            data.skills.push(box.querySelector('span').textContent.trim());
+        });
+    }
+
+    // Get HR Data if HR or Mixed
+    if (modeName.includes('HR') || modeName.includes('Mixed')) {
+        document.querySelectorAll('.hr-card.selected').forEach(card => {
+            data.hrFocus.push(card.querySelector('strong').textContent.trim());
+        });
+    }
+
+    return data;
+}
+
+

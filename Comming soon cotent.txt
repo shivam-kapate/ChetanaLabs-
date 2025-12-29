@@ -1,0 +1,115 @@
+<div id="video-assistant" class="view-section">
+                    <div class="vapi-builder-wrapper">
+
+                        <aside class="vapi-sub-sidebar">
+                            <div class="vapi-sub-header">
+                                <span style="font-weight: 600; font-size: 14px;">
+                                    <i class="fa-solid fa-video"></i> Video Campaigns
+                                </span>
+                            </div>
+
+                            <button class="btn-vapi-create" onclick="showCreateCampaignModal('video')">
+                                <i class="fa-solid fa-plus"></i> New Campaign
+                            </button>
+
+                            <div class="vapi-search">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" placeholder="Filter videos...">
+                            </div>
+
+                            <div class="campaign-list" id="video-list-container">
+                                <div class="vapi-list-item active"
+                                    style="padding:10px; font-size:12px; color:var(--text-secondary);">
+                                    Loading video campaigns...
+                                </div>
+                            </div>
+                        </aside>
+
+                        <main id="video-blank-state" class="vapi-main-content active"
+                            style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
+                            <i class="fa-solid fa-film"
+                                style="font-size: 50px; color: var(--primary-500); margin-bottom: 20px;"></i>
+                            <h2 style="font-size: 20px; color: white; margin-bottom: 10px;">Video Assistant</h2>
+                            <p style="color: var(--text-secondary); max-width: 400px;">
+                                Create AI-driven video interview sessions.
+                                Configure your avatar, script, and candidate list here.
+                            </p>
+                            <button class="btn-vapi-create"
+                                style="width: auto; margin-top: 20px; color: white; background: var(--primary-500); border:none;"
+                                onclick="showCreateCampaignModal('video')">
+                                <i class="fa-solid fa-plus"></i> Create First Project
+                            </button>
+                        </main>
+
+                        <main id="video-builder-content" class="vapi-main-content">
+
+                            <header class="vapi-content-header">
+                                <div class="vapi-title">
+                                    <h1 id="video-campaign-title">Loading...</h1>
+                                    <p>Type: <span style="color: var(--vapi-blue);">● Video Interview</span></p>
+                                </div>
+                                <div class="vapi-header-actions">
+                                    <button class="btn-vapi-launch"
+                                        onclick="showToast('Video Agent Published!', 'success')">
+                                        <i class="fa-solid fa-rocket"></i> Launch
+                                    </button>
+                                </div>
+                            </header>
+
+                            <div class="vapi-tabs">
+                                <div class="vapi-tab active" onclick="switchHrTab('vid-tab-candidates', this)">
+                                    <i class="fa-solid fa-database"></i> Source Data
+                                </div>
+                                <div class="vapi-tab" onclick="switchHrTab('vid-tab-structure', this)">
+                                    <i class="fa-solid fa-network-wired"></i> Interview Steps
+                                </div>
+                                <div class="vapi-tab" onclick="switchHrTab('vid-tab-questions', this)">
+                                    <i class="fa-solid fa-file-signature"></i> Script
+                                </div>
+                                <div class="vapi-tab" onclick="switchHrTab('vid-tab-avatar', this)">
+                                    <i class="fa-solid fa-user-astronaut"></i> AI Avatar
+                                </div>
+                            </div>
+
+                            <div id="vid-tab-candidates" class="hr-tab-content active">
+                                <div class="vapi-section-head">
+                                    <span style="font-size: 16px; font-weight: 600; color: white;">Candidate List
+                                        (Video)</span>
+                                </div>
+                                <div class="hr-upload-zone" ondrop="showToast('File added', 'success'); return false;">
+                                    <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                                    <h3 style="color:white; font-weight:500; font-size:14px; margin-bottom:4px;">Upload
+                                        Video Candidates</h3>
+                                    <p style="color:var(--text-tertiary); font-size:12px;">Drag & Drop CSV here</p>
+                                </div>
+                            </div>
+
+                            <div id="vid-tab-structure" class="hr-tab-content">
+                                <div class="vapi-section-head">
+                                    <span style="font-size: 15px; font-weight: 600; color: white;">Video Interview
+                                        Mode</span>
+                                </div>
+                                <p style="color: #888; font-size: 13px;">Select the visual environment for the
+                                    interview...</p>
+                            </div>
+
+                            <div id="vid-tab-questions" class="hr-tab-content">
+                                <div class="form-group">
+                                    <label class="form-label" style="color:white;">Video Script</label>
+                                    <textarea class="form-control" rows="12"
+                                        style="background: #121212; border-color: var(--vapi-border); color: #d4d4d8;">1. Please look at the camera and introduce yourself.
+2. I am showing you a code snippet on screen. Please explain the bug.</textarea>
+                                </div>
+                            </div>
+
+                            <div id="vid-tab-avatar" class="hr-tab-content">
+                                <div class="form-group">
+                                    <label class="form-label">Avatar Model</label>
+                                    <input type="text" class="form-control" value="Professional - Mark (3D)"
+                                        style="background:#121212; color:white; border:1px solid #333;">
+                                </div>
+                            </div>
+
+                        </main>
+                    </div>
+                </div>
