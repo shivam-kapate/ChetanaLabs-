@@ -7431,3 +7431,48 @@ body::-webkit-scrollbar,
 .domain-card-big.active .d-name {
     color: white;
 }
+
+
+/* --- FORCE SELECTED STATE VISIBILITY --- */
+
+/* Purple Theme (Aanya) */
+.agent-card-modern.theme-purple.selected {
+    border: 2px solid #a855f7 !important;
+    background: rgba(168, 85, 247, 0.1) !important;
+}
+
+/* Blue Theme (Rohan) */
+.agent-card-modern.theme-blue.selected {
+    border: 2px solid #3b82f6 !important;
+    background: rgba(59, 130, 246, 0.1) !important;
+}
+
+/* Orange Theme (Kavya) */
+.agent-card-modern.theme-orange.selected {
+    border: 2px solid #f97316 !important;
+    background: rgba(249, 115, 22, 0.1) !important;
+}
+
+/* Voice Cards (Standard Orange Selection) */
+.voice-card-el.selected {
+    border: 1px solid #f97316 !important;
+    background: rgba(249, 115, 22, 0.1) !important;
+    position: relative;
+    /* Needed for the checkmark */
+}
+
+/* Add a Checkmark to Voice Cards when selected */
+.voice-card-el.selected::after {
+    content: '\f058';
+    /* FontAwesome Check Circle */
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    color: #f97316;
+    background: #18181b;
+    /* Hides the border behind the icon */
+    border-radius: 50%;
+    font-size: 16px;
+}

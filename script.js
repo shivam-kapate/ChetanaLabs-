@@ -22,6 +22,44 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAllCandidatesTable();
 });
 
+
+// 1. VAPI CONFIGURATION (PASTE YOUR REAL IDs HERE)
+const VAPI_CONFIG = {
+    agents: {
+        'aanya': { id: "25568a84-2428-4f17-b8c9-17fb5ed8ea2d", name: "Aanya", role: "HR Specialist" },
+        'rohan': { id: "78334ae7-eee5-41ea-a1f6-53e93ccb456c", name: "Rohan", role: "Tech Lead" },
+        'kavya': { id: "2128baf8-b20b-4eae-a219-c69e81e08241", name: "Kavya", role: "Cultural Fit" }
+    },
+    voices: {
+        // Indian Accents
+        'en-IN-Neural2-A': "ZpfauF9kCS0SBbhMqc3i",
+        'en-IN-Neural2-D': "fooWT6UekrufC2qHLDa3",
+        'en-IN-Wavenet-C': "90ipbRoKi4CpHXvKVtl0",
+
+        // US/UK Accents
+        'en-US-Neural2-F': "nf4MCGNSdM0hxM95ZBQR",
+        'en-US-Polyglot-1': "rW2lcIFbB5AVdzWcOG9n",
+        'en-GB-Neural2-B': "GHKbgpqchXOxta6X2lSd",
+
+        // Hindi/Regional
+        'hi-IN-Neural2-A': "6p0P6gezgvY1v6xbLzmU"
+    }
+};
+
+// 2. GLOBAL STATE VARIABLES
+// (These must be outside functions so they don't disappear)
+window.currentConfig = {
+    agentId: null,
+    agentName: "Aanya",
+    voiceId: null,
+    language: "English (US)",
+    strictness: "Balanced",
+    interviewMode: "Technical"
+};
+
+window.currentGeneratedBlueprint = null;
+
+
 let candidateIdToDelete = null;
 let candidateRowToDelete = null;
 
@@ -1303,97 +1341,78 @@ function sbCloseModal() {
     modal.classList.remove('active');
 }
 
-/* --- REAL-TIME BLUEPRINT LOGIC (GROQ POWERED) --- */
 
-// Store the generated blueprint globally so we can save it later
-let currentGeneratedBlueprint = null;
 
-// --- FULL REPLACEMENT FOR: async function sbOpenModal() ---
+
 async function sbOpenModal() {
-    // 1. Select the generate button to update its state later
     const generateBtn = document.querySelector('.sb-pro-btn');
     const originalBtnText = generateBtn.innerHTML;
 
-    // --- STEP 1: BASIC VALIDATION ---
+    // --- A. Gather Data from Previous Tabs ---
 
-    // A. Check Candidates (Source Data)
-    const candidateRows = document.querySelectorAll('#candidates-list-body tr:not(:has(.empty-state-row))');
-    if (candidateRows.length === 0) {
-        showToast("Validation Failed: Please add at least one candidate in 'Source Data'.", "error");
-        switchHrTab('tab-candidates', document.querySelector('.vapi-tab:nth-child(1)'));
-        return;
-    }
-
-    // B. Check Interview Steps (Mode & Duration)
+    // 1. Interview Mode & Duration
+    // We look for the "selected" card in the Mode and Time sections
     const modeCard = document.querySelector('#mode-selection .step-card-compact.selected');
     const timeCard = document.querySelector('#time-selection .step-card-horizontal.selected');
 
-    if (!modeCard || !timeCard) {
-        showToast("Validation Failed: Please select Interview Mode and Duration.", "error");
-        switchHrTab('tab-structure', document.querySelector('.vapi-tab:nth-child(2)'));
+    const interviewMode = modeCard ? modeCard.querySelector('.step-title').innerText : "Technical";
+    const duration = timeCard ? timeCard.querySelector('.step-title').innerText : "15 Mins";
+
+    // 2. Tech Stack & Domain (From Step 2)
+    // We grab the dropdown value and any selected tech chips
+    const selectedDomain = document.getElementById('selected-domain') ? document.getElementById('selected-domain').value : "General";
+
+    let selectedSkills = [];
+    document.querySelectorAll('.tech-option-box.selected span').forEach(el => {
+        selectedSkills.push(el.innerText);
+    });
+
+    // 3. HR Focus Areas (From Step 2)
+    let hrFocusAreas = [];
+    document.querySelectorAll('.hr-card.selected strong').forEach(el => {
+        hrFocusAreas.push(el.innerText);
+    });
+
+    // 4. Job Details (From the Text Inputs in Script Tab)
+    const company = document.getElementById('sb-company').value || "Company";
+    const role = document.getElementById('sb-job-role').value || "Candidate";
+    const description = document.getElementById('sb-description').value || "";
+
+    // --- B. Validation ---
+    // Check if an AI Agent has been selected in the config
+    if (!currentConfig.agentId) {
+        showToast("Please select an AI Agent first.", "error");
         return;
     }
 
-    const modeName = modeCard.querySelector('.step-title').innerText;
+    // --- C. Construct Payload for Backend ---
+    const payload = {
+        // Agent Config (From Global Variable)
+        agent_name: currentConfig.agentName,
+        agent_id: currentConfig.agentId,
+        voice_id: currentConfig.voiceId,
+        language: currentConfig.language,
+        strictness: currentConfig.strictness,
 
-    // C. Check AI Persona & Strictness
-    const agentCard = document.querySelector('#agent-selection .agent-card-modern.selected');
-    const strictCard = document.querySelector('#strict-selection .round-option-card.selected');
+        // Interview Context (Gathered above)
+        interview_mode: interviewMode,
+        duration: duration,
+        job_role: role,
+        company_name: company,
+        job_description: description,
+        domain: selectedDomain,
+        tech_stack: selectedSkills.join(", "),
+        hr_focus: hrFocusAreas.join(", ")
+    };
 
-    if (!agentCard || !strictCard) {
-        showToast("Validation Failed: Please select an Agent and Strictness level.", "error");
-        switchHrTab('tab-agent', document.querySelector('.vapi-tab:nth-child(3)'));
-        return;
-    }
+    console.log("Sending Payload to AI:", payload);
 
-    // D. Check Script Inputs (Company & Role)
-    const company = document.getElementById('sb-company').value.trim();
-    const role = document.getElementById('sb-job-role').value.trim();
-    const desc = document.getElementById('sb-description').value.trim();
-
-    if (!company) return showToast("Validation Failed: Company Name is required.", "error");
-    if (!role) return showToast("Validation Failed: Job Role is required.", "error");
-
-
-    // --- STEP 2: GATHER CONFIGURATION DATA (NEW LOGIC) ---
-    // This uses the helper function 'getSelectedConfigData' defined in your code
-    const configData = getSelectedConfigData();
-
-    // Strict Validation for Technical/Mixed Rounds
-    if (modeName.includes('Technical') || modeName.includes('Mixed')) {
-        if (!configData.domain) {
-            showToast("Validation Failed: Please select a Professional Domain (e.g., Frontend, Data Science).", "error");
-            // Force switch to structure tab if they are on another tab
-            switchHrTab('tab-structure', document.querySelector('.vapi-tab:nth-child(2)'));
-            return;
-        }
-    }
-
-    // --- STEP 3: PREPARE PAYLOAD & CALL API ---
-
-    generateBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Generating Blueprint...';
+    // --- D. Call API ---
+    // 1. Show Loading State
+    generateBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Architecting Agent...';
     generateBtn.disabled = true;
 
     try {
-        const payload = {
-            // Basic Info
-            company_name: company,
-            job_role: role,
-            description: desc,
-            candidate_count: candidateRows.length,
-
-            // Agent Config
-            agent_persona: agentCard.querySelector('.agent-name').innerText,
-            strictness: strictCard.querySelector('.card-title').innerText,
-            interview_mode: modeName,
-            duration: timeCard.querySelector('.step-title').innerText,
-
-            // NEW: Detailed Configuration
-            job_domain: configData.domain,           // e.g. "DataScience"
-            tech_stack: configData.skills.join(', '), // e.g. "Python, TensorFlow, SQL"
-            hr_focus: configData.hrFocus.join(', ')   // e.g. "Cultural Fit, Stability"
-        };
-
         const response = await fetch('/api/generate-blueprint', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1403,81 +1422,80 @@ async function sbOpenModal() {
         if (!response.ok) throw new Error("AI Generation Failed");
 
         const blueprint = await response.json();
-        currentGeneratedBlueprint = blueprint; // Store globally for final save
 
-        // Render result to the modal (using your existing render function)
-        renderBlueprintToModal(blueprint, payload);
+        // 2. CRITICAL: Save Blueprint to Global Variable
+        // This ensures the "Confirm & Launch" button can see the generated prompt
+        window.currentGeneratedBlueprint = blueprint;
+        console.log("Blueprint Saved Globally:", window.currentGeneratedBlueprint);
 
-        // Open the modal
+        // 3. Render Data to Modal
+        // We use the safe render function we fixed earlier
+        if (typeof renderBlueprintToModal === 'function') {
+            renderBlueprintToModal(blueprint, payload);
+        } else {
+            console.warn("renderBlueprintToModal function is missing!");
+        }
+
+        // 4. Show the Modal
         document.getElementById('premiumScriptModal').classList.add('active');
 
     } catch (error) {
         console.error("Blueprint Error:", error);
         showToast("Failed to generate blueprint. Check console.", "error");
     } finally {
+        // 5. Reset Button State
         generateBtn.innerHTML = originalBtnText;
         generateBtn.disabled = false;
     }
 }
-function renderBlueprintToModal(blueprint, payload) {
-    // 1. Fill Top Metrics
-    document.getElementById('bp-candidate-count').innerText = payload.candidate_count;
-    document.getElementById('bp-persona-name').innerText = payload.agent_persona;
-    document.getElementById('bp-interview-mode').innerText = payload.interview_mode; // Fixed Key
-    document.getElementById('bp-total-time').innerText = blueprint.estimated_hours || "0";
-    // If you have a duration element in the modal, update it too
-    const durEl = document.getElementById('bp-duration');
-    if (durEl) durEl.innerText = payload.duration;
+function renderBlueprintToModal(blueprint, context) {
+    console.log("Rendering Blueprint:", blueprint);
 
-    // 2. Fill System Prompt (The Logic Box)
-    // Escaping HTML to prevent injection, though innerText is safer usually
-    const sysPrompt = blueprint.system_prompt || "System prompt could not be generated.";
+    // 1. Update Metrics (Candidates, Time, etc.) - These usually exist
+    if (document.getElementById('bp-candidate-count')) {
+        // You likely calculate this based on your own logic or static data
+        document.getElementById('bp-candidate-count').innerText = "12";
+    }
+
+    if (document.getElementById('bp-persona-name')) {
+        document.getElementById('bp-persona-name').innerText = context.agent_name || "AI Recruiter";
+    }
+
+    if (document.getElementById('bp-interview-mode')) {
+        document.getElementById('bp-interview-mode').innerText = context.interview_mode || "General";
+    }
+
+    // 2. Update System Prompt (The Logic Box)
     const logicBox = document.querySelector('.system-logic-box');
     if (logicBox) {
-        // Simple formatting to highlight keys if you want, or just dump text
-        logicBox.innerHTML = `<div style="color:#a1a1aa; white-space: pre-wrap;">${sysPrompt}</div>`;
+        // We format the prompt nicely
+        logicBox.innerHTML = `
+            <div style="font-family:monospace; font-size:12px; color:#a1a1aa; white-space:pre-wrap;">
+                ${blueprint.system_prompt || "No prompt generated."}
+            </div>
+        `;
     }
 
-    // 3. Render Script Phases (Cards)
-    const container = document.getElementById('blueprint-script-container');
-    container.innerHTML = ''; // Clear previous
+    // 3. THE FIX: Safely Handle the "Interview Flow" Section
+    const scriptContainer = document.getElementById('blueprint-script-container');
 
-    if (blueprint.phases && Array.isArray(blueprint.phases)) {
-        blueprint.phases.forEach((phase, index) => {
-            let dialogueHTML = '';
-
-            if (phase.questions) {
-                phase.questions.forEach(q => {
-                    const isSys = q.speaker === 'SYS';
-                    const style = isSys ? 'color:var(--text-tertiary); font-style:italic;' : '';
-                    const speakerLabel = isSys ? '<i class="fa-solid fa-microchip"></i>' : q.speaker;
-
-                    dialogueHTML += `
-                        <div class="dialogue-line">
-                            <div class="speaker">${speakerLabel}</div>
-                            <div class="text" style="${style}">${q.text}</div>
-                        </div>
-                    `;
-                });
-            }
-
-            // Add a visual accent to the second card just for style
-            const borderStyle = index === 1 ? 'border-left: 3px solid var(--primary-500);' : '';
-
-            const card = `
-                <div class="script-phase-card" style="${borderStyle}">
-                    <div class="script-phase-header">
-                        <span class="phase-name">${phase.name}</span>
-                        <span class="phase-time">${phase.time_limit}</span>
-                    </div>
-                    ${dialogueHTML}
-                </div>
-            `;
-            container.innerHTML += card;
-        });
-    } else {
-        container.innerHTML = '<div style="padding:20px; color:gray;">No phases generated.</div>';
+    // We check: Does this container exist? 
+    // If you deleted it from HTML, this is NULL, so the code inside SKIPs automatically.
+    if (scriptContainer) {
+        let html = '';
+        if (blueprint.phases) {
+            blueprint.phases.forEach((phase, index) => {
+                html += `
+                <div class="script-phase">
+                    <div class="phase-badge">Step ${index + 1}</div>
+                    <strong>${phase.name || 'Phase'}</strong>
+                    <p>${phase.description || ''}</p>
+                </div>`;
+            });
+        }
+        scriptContainer.innerHTML = html;
     }
+    // No 'else' needed. If it's missing, we just do nothing (No Error!)
 }
 
 
@@ -1892,23 +1910,46 @@ function selectVoiceCard(element) {
 }
 
 
+/* =========================================
+   2. SELECTION HANDLERS (UI + LOGIC)
+   ========================================= */
 
-/* --- UPDATED SELECTION LOGIC --- */
+// A. Handle AGENT Selection (The big cards: Aanya, Rohan, Kavya)
+function selectAgentVapi(element) {
+    // 1. Remove 'selected' class from ALL agent cards
+    document.querySelectorAll('#agent-selection .agent-card-modern').forEach(card => {
+        card.classList.remove('selected');
+    });
 
-// 1. Select AGENT (New Design)
-function selectAgent(element) {
-    // Remove selected from siblings in the grid
-    const container = document.getElementById('agent-selection');
-    container.querySelectorAll('.agent-card-modern').forEach(c => c.classList.remove('selected'));
-    // Add to clicked
+    // 2. Add 'selected' class to the CLICKED card
     element.classList.add('selected');
+
+    // 3. Save the selection to our config
+    const agentKey = element.getAttribute('data-assistant-key');
+    if (VAPI_CONFIG.agents[agentKey]) {
+        currentConfig.agentId = VAPI_CONFIG.agents[agentKey].id;
+        currentConfig.agentName = VAPI_CONFIG.agents[agentKey].name;
+        console.log(`Agent Selected: ${currentConfig.agentName}`);
+    }
 }
 
-// 2. Select VOICE (ElevenLabs Design)
-function selectVoice(element) {
-    const container = document.getElementById('voice-selection-grid');
-    container.querySelectorAll('.voice-card-el').forEach(c => c.classList.remove('selected'));
+// B. Handle VOICE Selection (The list: Raju, Priya, etc.)
+function selectVoiceVapi(element) {
+    // 1. Remove 'selected' class from ALL voice cards
+    document.querySelectorAll('#voice-selection-grid .voice-card-el').forEach(card => {
+        card.classList.remove('selected');
+    });
+
+    // 2. Add 'selected' class to the CLICKED card
     element.classList.add('selected');
+
+    // 3. Save the selection
+    const voiceId = element.getAttribute('data-voice-id');
+    // If we have a mapped ID in VAPI_CONFIG, use it; otherwise use the raw ID
+    const realVoiceId = VAPI_CONFIG.voices[voiceId] || voiceId;
+
+    currentConfig.voiceId = realVoiceId;
+    console.log(`Voice Selected: ${realVoiceId}`);
 }
 
 // 3. Play Audio Preview (Mock)
@@ -1946,34 +1987,20 @@ function toggleSeeMoreVoices(btn) {
 }
 
 
-// --- LANGUAGE SELECTION LOGIC ---
 function selectLanguage(element) {
-    // 1. Find container
-    const container = document.getElementById('lang-selection');
-
-    // 2. Remove selected class from siblings
-    container.querySelectorAll('.lang-card').forEach(card => card.classList.remove('selected'));
-
-    // 3. Add to clicked
+    document.querySelectorAll('#lang-selection .lang-card').forEach(c => c.classList.remove('selected'));
     element.classList.add('selected');
 
-    // Optional: Log selection
-    console.log("Selected Language:", element.querySelector('.lang-name').innerText);
+    currentConfig.language = element.querySelector('.lang-name').innerText;
+    console.log(`Updated Config: Language is now ${currentConfig.language}`);
 }
 
-// --- STRICTNESS SELECTION LOGIC ---
 function selectStrictness(element) {
-    // 1. Find container
-    const container = document.getElementById('strict-selection');
-
-    // 2. Remove selected class from siblings
-    container.querySelectorAll('.round-option-card').forEach(card => card.classList.remove('selected'));
-
-    // 3. Add to clicked
+    document.querySelectorAll('#strict-selection .round-option-card').forEach(c => c.classList.remove('selected'));
     element.classList.add('selected');
 
-    // Optional: Log selection
-    console.log("Selected Strictness:", element.querySelector('.card-title').innerText);
+    currentConfig.strictness = element.querySelector('.card-title').innerText;
+    console.log(`Updated Config: Strictness is now ${currentConfig.strictness}`);
 }
 
 function selectOption(element, containerId) {
@@ -2286,3 +2313,69 @@ function getSelectedConfigData() {
 }
 
 
+
+
+
+// ==========================================
+// 4. LAUNCH CAMPAIGN (Sends IDs + Prompt to Backend)
+// ==========================================
+async function sbSaveScript() {
+    const launchBtn = document.querySelector('.pm-footer .btn-primary');
+
+    // 1. Validation
+    if (!currentGeneratedBlueprint || !currentGeneratedBlueprint.system_prompt) {
+        showToast("Error: No System Prompt found. Please generate it first.", "error");
+        return;
+    }
+    if (!currentConfig.agentId || !currentConfig.voiceId) {
+        showToast("Error: Agent or Voice ID missing.", "error");
+        return;
+    }
+
+    // 2. Prepare the Final Payload
+    // This contains EVERYTHING needed to start the Vapi Call
+    const launchPayload = {
+        campaign_name: `${currentConfig.agentName} - ${currentConfig.interviewMode} Campaign`,
+
+        // --- THE CRITICAL VAPI CONFIG ---
+        vapi_agent_id: currentConfig.agentId,   // The selected Assistant ID
+        vapi_voice_id: currentConfig.voiceId,   // The selected Voice Model ID
+        system_prompt: currentGeneratedBlueprint.system_prompt, // The detailed instruction
+
+        // Metadata
+        candidates: window.uploadedCandidates || [], // List of people to call
+        strictness: currentConfig.strictness,
+        interview_mode: currentConfig.interviewMode
+    };
+
+    console.log("🚀 Launching Campaign with Payload:", launchPayload);
+
+    // 3. Send to Backend
+    launchBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Launching...';
+    launchBtn.disabled = true;
+
+    try {
+        const response = await fetch('/api/launch-campaign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(launchPayload)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            showToast(`Success! Campaign "${result.campaign_id}" started.`, "success");
+            sbCloseModal();
+            // Optional: Redirect to dashboard or show 'Active' status
+        } else {
+            throw new Error(result.detail || "Launch failed");
+        }
+
+    } catch (error) {
+        console.error("Launch Error:", error);
+        showToast("Failed to launch campaign.", "error");
+    } finally {
+        launchBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Confirm & Launch';
+        launchBtn.disabled = false;
+    }
+}

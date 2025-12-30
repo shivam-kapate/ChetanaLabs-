@@ -511,8 +511,8 @@
                                 </div>
                                 <div class="vapi-header-actions">
 
-                                    <button class="btn-vapi-launch" onclick="showToast('Published!', 'success')">
-                                        <i class="fa-solid fa-rocket"></i> Launch Campaign
+                                    <button class="btn-vapi-launch" onclick="launchVapiCampaign()">
+                                        <i class="fa-solid fa-rocket"></i> Start Calling Campaign
                                     </button>
                                 </div>
                             </header>
@@ -1009,27 +1009,18 @@
                                                 <span>System Prompt / Agent Behavior</span>
                                             </div>
                                             <div class="system-logic-box">
-                                                <div><span class="key">"role"</span>: <span class="str"
-                                                        id="bp-json-role">"Senior Recruiter"</span>,</div>
-                                                <div><span class="key">"strictness"</span>: <span
-                                                        class="val">"Medium"</span>,</div>
-                                                <div><span class="key">"context"</span>: <span class="str"
-                                                        id="bp-json-context">"Looking for 5+ years exp..."</span>,</div>
-                                                <div><span class="key">"instruction"</span>: <span class="val">"Ask one
-                                                        question at a time. If answer is vague, drill down. Be polite
-                                                        but professional."</span></div>
+                                                <div style="color:gray; font-style:italic;">Generating logic...</div>
                                             </div>
                                         </div>
 
-                                        <div>
+                                        <!-- <div>
                                             <div class="blueprint-section-title">
                                                 <i class="fa-solid fa-list-check"></i>
                                                 <span>Generated Interview Flow</span>
                                             </div>
 
-                                            <div id="blueprint-script-container">
-                                            </div>
-                                        </div>
+                                            <div id="blueprint-script-container"></div>
+                                        </div> -->
 
                                     </div>
 
@@ -1052,7 +1043,8 @@
 
                                 <div class="agent-grid-3" id="agent-selection">
 
-                                    <div class="agent-card-modern theme-purple selected" onclick="selectAgent(this)">
+                                    <div class="agent-card-modern theme-purple selected" onclick="selectAgentVapi(this)"
+                                        data-assistant-key="aanya" data-vapi-id="asst_placeholder_aanya">
                                         <div class="agent-avatar-circle">
                                         </div>
                                         <h3 class="agent-name">Aanya - HR Pro</h3>
@@ -1060,7 +1052,8 @@
                                         </p>
                                     </div>
 
-                                    <div class="agent-card-modern theme-blue" onclick="selectAgent(this)">
+                                    <div class="agent-card-modern theme-blue" onclick="selectAgentVapi(this)"
+                                        data-assistant-key="rohan" data-vapi-id="asst_placeholder_rohan">
                                         <div class="agent-avatar-circle">
                                         </div>
                                         <h3 class="agent-name">Rohan - Tech Lead</h3>
@@ -1068,7 +1061,8 @@
                                             concepts.</p>
                                     </div>
 
-                                    <div class="agent-card-modern theme-orange" onclick="selectAgent(this)">
+                                    <div class="agent-card-modern theme-orange" onclick="selectAgentVapi(this)"
+                                        data-assistant-key="kavya" data-vapi-id="asst_placeholder_kavya">
                                         <div class="agent-avatar-circle">
                                         </div>
                                         <h3 class="agent-name">Kavya - Casual</h3>
@@ -1085,7 +1079,8 @@
 
                                 <div id="voice-selection-grid" class="eleven-grid">
 
-                                    <div class="voice-card-el selected" onclick="selectVoice(this)">
+                                    <div class="voice-card-el selected" onclick="selectVoiceVapi(this)"
+                                        data-voice-id="en-IN-Neural2-A">
                                         <div class="el-avatar bg-grad-3">
                                             <div class="el-play-overlay" onclick="playVoicePreview(event, this)">
                                                 <i class="fa-solid fa-play"></i>
@@ -1099,7 +1094,22 @@
                                         </div>
                                     </div>
 
-                                    <div class="voice-card-el" onclick="selectVoice(this)">
+                                    <div class="voice-card-el" onclick="selectVoiceVapi(this)"
+                                        data-voice-id="en-IN-Neural2-B">
+                                        <div class="el-avatar bg-grad-1">
+                                            <div class="el-play-overlay" onclick="playVoicePreview(event, this)">
+                                                <i class="fa-solid fa-play"></i>
+                                            </div>
+                                        </div>
+                                        <div class="el-info">
+                                            <div class="el-name">Priya</div>
+                                            <div class="el-tag">Professional Indian Accent</div>
+                                            <div class="el-lang">🇮🇳 English</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="voice-card-el" onclick="selectVoiceVapi(this)"
+                                        data-voice-id="en-IN-Wavenet-C">
                                         <div class="el-avatar bg-grad-5">
                                             <div class="el-play-overlay" onclick="playVoicePreview(event, this)">
                                                 <i class="fa-solid fa-play"></i>
@@ -1113,7 +1123,8 @@
                                         </div>
                                     </div>
 
-                                    <div class="voice-card-el" onclick="selectVoice(this)">
+                                    <div class="voice-card-el" onclick="selectVoiceVapi(this)"
+                                        data-voice-id="en-US-Wavenet-D">
                                         <div class="el-avatar bg-grad-2">
                                             <div class="el-play-overlay" onclick="playVoicePreview(event, this)">
                                                 <i class="fa-solid fa-play"></i>
@@ -1592,6 +1603,7 @@
 
     <div class="toast-container"></div>
 
+    <script src="vapi-integration.js"></script>
     <script src="script.js"></script>
     <div id="deleteConfirmModal" class="modal-overlay" style="display:none;">
         <div class="modal-content" style="max-width: 400px; text-align: center;">
