@@ -317,48 +317,16 @@
                                     <tr>
                                         <th>Name</th>
                                         <th>Contact</th>
-                                        <th>Applied For</th>
+                                        <th>Campaign</th>
                                         <th>Status</th>
-                                        <th>Duration</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody>
+                                <tbody id="all-candidates-tbody">
                                     <tr>
-                                        <td><strong>Alex Johnson</strong></td>
-                                        <td class="font-mono text-muted">+1 (555) 123-4567</td>
-                                        <td>Sales Rep</td>
-                                        <td><span class="badge badge-neutral">Not Contacted</span></td>
-                                        <td class="font-mono text-muted">-</td>
-                                        <td>
-                                            <div style="display: flex; gap: 8px;">
-                                                <button class="icon-btn" style="width: 32px; height: 32px;"><i
-                                                        class="fa-solid fa-phone"></i></button>
-                                                <button class="icon-btn" style="width: 32px; height: 32px;"><i
-                                                        class="fa-solid fa-trash"></i></button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>Maria Garcia</strong></td>
-                                        <td class="font-mono text-muted">+1 (555) 987-6543</td>
-                                        <td>Customer Support</td>
-                                        <td><span class="badge badge-success">Passed</span></td>
-                                        <td class="font-mono">12m 45s</td>
-                                        <td>
-                                            <button class="icon-btn" style="width: 32px; height: 32px;"><i
-                                                    class="fa-solid fa-eye"></i></button>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>David Kim</strong></td>
-                                        <td class="font-mono text-muted">+1 (555) 456-7890</td>
-                                        <td>Software Eng</td>
-                                        <td><span class="badge badge-danger">Unresponsive</span></td>
-                                        <td class="font-mono">03m 12s</td>
-                                        <td>
-                                            <button class="icon-btn" style="width: 32px; height: 32px;"><i
-                                                    class="fa-solid fa-rotate-right"></i></button>
+                                        <td colspan="5"
+                                            style="text-align:center; padding:30px; color:var(--text-tertiary);">
+                                            <i class="fa-solid fa-circle-notch fa-spin"></i> Loading candidates...
                                         </td>
                                     </tr>
                                 </tbody>
@@ -507,12 +475,20 @@
                             <header class="vapi-content-header">
                                 <div class="vapi-title">
                                     <h1 id="vapi-campaign-title">Q4 Sales Hiring Drive</h1>
-                                    <p>Status: <span style="color: var(--vapi-yellow);">● In Design</span></p>
+                                    <p>Status: <span id="campaign-status-text" style="color: var(--vapi-yellow);">● In
+                                            Design</span></p>
                                 </div>
                                 <div class="vapi-header-actions">
+                                    <!-- Launch Button - Show for In Design status -->
+                                    <button id="btn-launch-campaign" class="btn-vapi-launch"
+                                        onclick="launchVapiCampaign()" style="display:none;">
+                                        <i class="fa-solid fa-rocket"></i> Start Campaign
+                                    </button>
 
-                                    <button class="btn-vapi-launch" onclick="launchVapiCampaign()">
-                                        <i class="fa-solid fa-rocket"></i> Start Calling Campaign
+                                    <!-- Stop Button - Show for Active status -->
+                                    <button id="btn-stop-campaign" class="btn-vapi-stop" onclick="stopCampaign()"
+                                        style="display:none;">
+                                        <i class="fa-solid fa-stop-circle"></i> Stop Campaign
                                     </button>
                                 </div>
                             </header>
@@ -1360,9 +1336,10 @@
                                                     <th>Status</th>
                                                     <th>AI Score</th>
                                                     <th>Date</th>
+                                                    <th style="text-align: center; width: 80px;">Actions</th>
                                                 </tr>
                                             </thead>
-                                            <tbody>
+                                            <tbody id="reports-table-body">
                                                 <tr>
                                                     <td><strong>Sarah Jenkins</strong><br><span
                                                             style="font-size:10px; color:#71717a;">sarah.j@example.com</span>
@@ -1370,6 +1347,13 @@
                                                     <td><span class="badge badge-success">Selected</span></td>
                                                     <td><span style="color:#10b981; font-weight:700;">9.2/10</span></td>
                                                     <td style="color:#71717a;">Oct 24</td>
+                                                    <td style="text-align: center;">
+                                                        <button class="btn-view-report"
+                                                            onclick="openCandidateReport('demo_candidate_1')"
+                                                            title="View Detailed Report">
+                                                            <i class="fa-solid fa-eye"></i>
+                                                        </button>
+                                                    </td>
                                                 </tr>
                                                 <tr>
                                                     <td><strong>Michael Chen</strong><br><span
@@ -1378,6 +1362,13 @@
                                                     <td><span class="badge badge-danger">Rejected</span></td>
                                                     <td><span style="color:#ef4444; font-weight:700;">4.5/10</span></td>
                                                     <td style="color:#71717a;">Oct 23</td>
+                                                    <td style="text-align: center;">
+                                                        <button class="btn-view-report"
+                                                            onclick="openCandidateReport('demo_candidate_2')"
+                                                            title="View Detailed Report">
+                                                            <i class="fa-solid fa-eye"></i>
+                                                        </button>
+                                                    </td>
                                                 </tr>
                                             </tbody>
                                         </table>
@@ -1628,6 +1619,119 @@
         </div>
     </div>
 
+    <div id="reportModal" class="premium-modal-overlay">
+        <div class="premium-modal-box" style="width: 900px; max-height: 95vh;">
+
+            <div class="pm-header">
+                <div class="pm-title">
+                    <div class="avatar" id="report-avatar"
+                        style="width: 40px; height: 40px; font-size: 16px; background: var(--primary-100); color: var(--primary-500); border: 1px solid var(--primary-500);">
+                        --</div>
+                    <div>
+                        <h3 id="report-name" style="margin:0; font-size:16px;">Loading...</h3>
+                        <span id="report-email"
+                            style="font-size:12px; color:var(--text-tertiary);">loading@example.com</span>
+                    </div>
+                </div>
+                <div style="display:flex; gap:10px; align-items: center;">
+                    <span class="pm-badge" id="report-status">Analyzed</span>
+                    <button onclick="closeReportModal()" class="icon-btn ghost" style="border:none;"><i
+                            class="fa-solid fa-xmark" style="font-size: 18px;"></i></button>
+                </div>
+            </div>
+
+            <div class="pm-body-scroll" style="background: #09090b; padding: 24px;">
+
+                <div class="report-grid-top">
+                    <div class="report-card audio-section">
+                        <div class="card-label"><i class="fa-solid fa-microphone-lines"></i> Interview Recording</div>
+                        <div class="audio-player-ui">
+                            <button class="play-btn"><i class="fa-solid fa-play"></i></button>
+                            <div class="wave-visual">
+                                <div class="wave-bar" style="height: 40%"></div>
+                                <div class="wave-bar" style="height: 60%"></div>
+                                <div class="wave-bar" style="height: 90%"></div>
+                                <div class="wave-bar" style="height: 50%"></div>
+                                <div class="wave-bar" style="height: 30%"></div>
+                                <div class="wave-bar" style="height: 70%"></div>
+                                <div class="wave-bar" style="height: 40%"></div>
+                                <div class="wave-bar" style="height: 60%"></div>
+                                <div class="wave-bar" style="height: 90%"></div>
+                                <div class="wave-bar" style="height: 50%"></div>
+                                <div class="wave-bar" style="height: 70%"></div>
+                                <div class="wave-bar" style="height: 40%"></div>
+                            </div>
+                            <span class="time-label" id="audio-duration">14:30</span>
+                        </div>
+                    </div>
+
+                    <div class="report-card score-section">
+                        <div class="card-label"><i class="fa-solid fa-bullseye"></i> AI Fit Score</div>
+                        <div class="big-score">
+                            <span id="report-total-score">--</span><small>/100</small>
+                        </div>
+                        <p class="score-desc" id="report-summary-short">Strong Candidate</p>
+                    </div>
+                </div>
+
+                <div class="report-metrics-grid">
+                    <div class="metric-box">
+                        <span class="m-label">Confidence</span>
+                        <div class="progress-bar">
+                            <div class="fill" id="bar-confidence" style="width: 0%;"></div>
+                        </div>
+                        <span class="m-val" id="val-confidence">--</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="m-label">Communication</span>
+                        <div class="progress-bar">
+                            <div class="fill" id="bar-communication" style="width: 0%;"></div>
+                        </div>
+                        <span class="m-val" id="val-communication">--</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="m-label">Tech Knowledge</span>
+                        <div class="progress-bar">
+                            <div class="fill" id="bar-technical" style="width: 0%;"></div>
+                        </div>
+                        <span class="m-val" id="val-technical">--</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="m-label">Cultural Fit</span>
+                        <div class="progress-bar">
+                            <div class="fill" id="bar-cultural" style="width: 0%;"></div>
+                        </div>
+                        <span class="m-val" id="val-cultural">--</span>
+                    </div>
+                </div>
+
+                <div class="transcript-wrapper">
+                    <div class="section-header">
+                        <h4><i class="fa-solid fa-align-left" style="color:var(--primary-500); margin-right:8px;"></i>
+                            Full Transcript</h4>
+                        <button class="btn btn-secondary btn-sm" style="font-size:10px; padding: 4px 8px;">Download
+                            PDF</button>
+                    </div>
+                    <div id="report-transcript-box" class="transcript-box">
+                        <div style="text-align:center; color:gray; padding:20px;">Loading transcript...</div>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="pm-footer">
+                <button class="btn btn-secondary" onclick="closeReportModal()">Close</button>
+                <button class="btn btn-primary"
+                    onclick="showToast('Candidate Shortlisted!', 'success'); closeReportModal();">
+                    <i class="fa-solid fa-check"></i> Shortlist Candidate
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+
 </body>
+
 
 </html>

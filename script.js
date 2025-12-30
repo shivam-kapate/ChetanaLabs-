@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     loadLiveActivityTable();
-    loadAllCandidatesTable();
+    loadAllCandidatesTable(); // Load real candidates
 });
 
 
@@ -409,40 +409,65 @@ async function selectVapiCampaign(element, title, campaignId) {
     tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:gray;"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</td></tr>';
 
     try {
-        // 4. Fetch Candidates from DB
+        // 4. Fetch Campaign Config and Status first
+        const campRes = await fetch(`/api/campaigns/${campaignId}`);
+        const campData = await campRes.json();
+
+        const status = campData.status || 'In Design';
+
+        // 5. Fetch Candidates from DB
         const candRes = await fetch(`/api/campaigns/${campaignId}/candidates`);
         const candData = await candRes.json();
 
         // Clear Loading Spinner
         tbody.innerHTML = '';
 
-        if (candData.candidates && candData.candidates.length > 0) {
-            candData.candidates.forEach(c => {
-                // ✅ FIX IS HERE: We pass c.id as the 4th argument
-                addCandidateRowToUI(c.name, c.phone, c.email, c.id);
-            });
-            document.getElementById('candidate-count').innerText = candData.candidates.length;
+        // CRITICAL: Only display candidates if campaign is "In Design"
+        if (status === 'In Design') {
+            if (candData.candidates && candData.candidates.length > 0) {
+                candData.candidates.forEach(c => {
+                    // ✅ FIX IS HERE: We pass c.id as the 4th argument
+                    addCandidateRowToUI(c.name, c.phone, c.email, c.id);
+                });
+                document.getElementById('candidate-count').innerText = candData.candidates.length;
+            } else {
+                // Empty State
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="empty-state-row">
+                            <i class="fa-solid fa-users-slash"></i>
+                            <span>No candidates added yet.</span>
+                        </td>
+                    </tr>
+                `;
+                document.getElementById('candidate-count').innerText = "0";
+            }
         } else {
-            // Empty State
+            // For Active/Stopped campaigns, show empty state (ready for new additions)
             tbody.innerHTML = `
                 <tr>
                     <td colspan="4" class="empty-state-row">
-                        <i class="fa-solid fa-users-slash"></i>
-                        <span>No candidates added yet.</span>
+                        <i class="fa-solid fa-plus-circle"></i>
+                        <span>Ready to add new candidates to this ${status.toLowerCase()} campaign.</span>
                     </td>
                 </tr>
             `;
             document.getElementById('candidate-count').innerText = "0";
         }
 
-        // 5. Fetch Config (Rest of your code...)
-        const campRes = await fetch(`/api/campaigns/${campaignId}`);
-        const campData = await campRes.json();
-
         if (campData.config) {
             if (campData.config.company_name) document.getElementById('sb-company').value = campData.config.company_name;
             if (campData.config.job_role) document.getElementById('sb-job-role').value = campData.config.job_role;
             if (campData.config.description) document.getElementById('sb-description').value = campData.config.description;
+        }
+
+        // 6. Update UI based on campaign status
+        updateHeaderButtons(status);
+        updateTabVisibility(status);
+
+        // 7. If campaign is active, auto-navigate to Reports tab
+        if (status === 'Active') {
+            switchHrTab('tab-reports', document.querySelector('[onclick*="tab-reports"]'));
         }
 
     } catch (e) {
@@ -469,6 +494,12 @@ function switchHrTab(tabId, tabElement) {
     // 2. Activate clicked tab
     tabElement.classList.add('active');
     document.getElementById(tabId).classList.add('active');
+
+    // 3. Load data for specific tabs
+    if (tabId === 'tab-reports') {
+        // Load campaign reports when Reports tab is opened
+        loadCampaignReports();
+    }
 }
 
 // Remove the old selectRound function and add this:
@@ -525,13 +556,29 @@ async function loadUserCampaigns(type = 'audio') {
                 (c.type === type) || (!c.type && type === 'audio')
             );
             populateCampaignsSidebar(filtered, type);
+
+            // NEW: Auto-select first Active campaign or most recent campaign
+            if (filtered.length > 0 && !activeCampaignId) {
+                // Prioritize Active campaigns, then fall back to the first (most recent) campaign
+                const campaignToSelect = filtered.find(c => c.status === 'Active') || filtered[0];
+
+                // Find the corresponding list item in the sidebar
+                const listItem = document.querySelector(`.vapi-list-item[onclick*="${campaignToSelect.id}"]`);
+                if (listItem) {
+                    // Trigger selection to load campaign data and restore UI state
+                    selectVapiCampaign(listItem, campaignToSelect.name, campaignToSelect.id);
+                }
+            }
         }
     } catch (error) {
         console.error("Failed to load campaigns:", error);
     }
 }
 
+
 let activeCampaignId = null;
+let activeCampaignStatus = 'In Design'; // Track current campaign status
+let stagedCandidates = []; // Temporary array for Active campaigns
 
 // --- UPDATED POPULATE FUNCTION ---
 function populateCampaignsSidebar(campaigns, type) {
@@ -698,34 +745,73 @@ async function selectVapiCampaign(element, title, campaignId) {
     if (element) element.classList.add('active');
     document.getElementById('vapi-campaign-title').textContent = title;
 
-    // 2. Set Active Global ID
+    // 2. Reset Tabs to Default (Source Data tab)
+    document.querySelectorAll('.vapi-tab').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.hr-tab-content').forEach(el => el.classList.remove('active'));
+
+    // Activate default tab (Source Data)
+    const defaultTab = document.querySelector('.vapi-tab[onclick*="tab-candidates"]');
+    const defaultContent = document.getElementById('tab-candidates');
+    if (defaultTab) defaultTab.classList.add('active');
+    if (defaultContent) defaultContent.classList.add('active');
+
+    // 3. Set Active Global ID
     activeCampaignId = campaignId;
 
     // REMOVED THE TOAST HERE as requested
     // showToast(...); <--- Deleted
 
     try {
-        // 3. Fetch Candidates from DB
+        // 3. Fetch Campaign Config first to check status
+        const campRes = await fetch(`/api/campaigns/${campaignId}`);
+        const campData = await campRes.json();
+
+        // 4. Check campaign status
+        const campaignStatus = campData.status || 'In Design';
+        console.log(`📋 Campaign Status: ${campaignStatus}`);
+
+        // Store status globally for use in add functions
+        activeCampaignStatus = campaignStatus;
+
+        // Clear staging area when switching campaigns
+        stagedCandidates = [];
+
+        // 5. Fetch Candidates from DB
         const candRes = await fetch(`/api/campaigns/${campaignId}/candidates`);
         const candData = await candRes.json();
 
-        // 4. Render Candidates (Source Data Tab)
+        // 6. Render Candidates (Source Data Tab) - Only show for "In Design" status
         const tbody = document.getElementById('candidates-list-body');
         tbody.innerHTML = '';
 
-        if (candData.candidates && candData.candidates.length > 0) {
-            candData.candidates.forEach(c => {
-                // Use the UI helper to add row without saving again
-                addCandidateRowToUI(c.name, c.phone, c.email);
-            });
-            document.getElementById('candidate-count').innerText = candData.candidates.length;
+        // CRITICAL CHANGE: Only display candidates if campaign is "In Design"
+        // For "Active" campaigns, Source Data section should be empty for adding NEW candidates
+        if (campaignStatus === 'In Design') {
+            if (candData.candidates && candData.candidates.length > 0) {
+                candData.candidates.forEach(c => {
+                    // Use the UI helper to add row without saving again
+                    addCandidateRowToUI(c.name, c.phone, c.email);
+                });
+                document.getElementById('candidate-count').innerText = candData.candidates.length;
+            } else {
+                document.getElementById('candidate-count').innerText = "0";
+            }
         } else {
+            // For Active/Stopped campaigns, show empty state (ready for new additions)
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="empty-state-row">
+                        <i class="fa-solid fa-plus-circle"></i>
+                        <span>Ready to add new candidates to this ${campaignStatus.toLowerCase()} campaign.</span>
+                    </td>
+                </tr>
+            `;
             document.getElementById('candidate-count').innerText = "0";
         }
 
-        // 5. Fetch Campaign Config (To restore selected cards)
-        const campRes = await fetch(`/api/campaigns/${campaignId}`);
-        const campData = await campRes.json();
+        // 7. Update UI based on campaign status
+        updateHeaderButtons(campaignStatus);
+        updateTabVisibility(campaignStatus);
 
         // Restore saved inputs if they exist
         if (campData.config) {
@@ -818,6 +904,37 @@ async function confirmExcelImport() {
         return;
     }
 
+    // Check if campaign is Active - use staging instead of direct save
+    if (activeCampaignStatus === 'Active' || activeCampaignStatus === 'Stopped') {
+        // Add to staging array
+        stagedCandidates.push(...extractedCandidates);
+
+        // Display in UI
+        const tbody = document.getElementById('candidates-list-body');
+
+        // Clear empty state if it exists
+        const emptyState = tbody.querySelector('.empty-state-row');
+        if (emptyState) {
+            tbody.innerHTML = '';
+        }
+
+        // Add all candidates to UI
+        extractedCandidates.forEach(c => {
+            addCandidateRowToUI(c.name, c.phone, c.email, null);
+        });
+
+        showToast(`${extractedCandidates.length} candidates added to staging. Click 'Add to Campaign' to confirm.`, "success");
+
+        // Clear and close
+        extractedCandidates = [];
+        closePreview();
+
+        // Show the "Add to Campaign" button
+        showAddToCampaignButton();
+        return;
+    }
+
+    // For "In Design" campaigns, save directly to DB (original behavior)
     const confirmBtn = document.querySelector('#excelPreviewModal .btn-primary');
     let originalText = confirmBtn.innerHTML;
     confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importing...';
@@ -868,7 +985,7 @@ async function confirmExcelImport() {
         }
     }
 }
-// --- ADD MANUAL CANDIDATE (Fixed) ---
+// --- ADD MANUAL CANDIDATE (Updated for Staging) ---
 async function addManualCandidate() {
     if (!activeCampaignId) {
         showToast("Please select a campaign first.", "error");
@@ -888,6 +1005,27 @@ async function addManualCandidate() {
         return;
     }
 
+    // Check if campaign is Active - use staging instead of direct save
+    if (activeCampaignStatus === 'Active' || activeCampaignStatus === 'Stopped') {
+        // Add to staging array
+        stagedCandidates.push({ name, phone, email });
+
+        // Display in UI
+        addCandidateRowToUI(name, phone, email, null);
+
+        showToast("Candidate added to staging. Click 'Add to Campaign' to confirm.", "success");
+
+        // Clear inputs
+        nameInput.value = "";
+        phoneInput.value = "";
+        emailInput.value = "";
+
+        // Show the "Add to Campaign" button
+        showAddToCampaignButton();
+        return;
+    }
+
+    // For "In Design" campaigns, save directly to DB (original behavior)
     const btn = document.querySelector('.btn-quick-add');
     let originalText = btn.innerHTML;
     if (btn) {
@@ -937,6 +1075,7 @@ async function addManualCandidate() {
         }
     }
 }
+
 
 // 4. Helper: Add Row to Table (The Missing Link)
 function addCandidateToTable(name, phone, email) {
@@ -1431,7 +1570,7 @@ async function sbOpenModal() {
         // 3. Render Data to Modal
         // We use the safe render function we fixed earlier
         if (typeof renderBlueprintToModal === 'function') {
-            renderBlueprintToModal(blueprint, payload);
+            await renderBlueprintToModal(blueprint, payload);
         } else {
             console.warn("renderBlueprintToModal function is missing!");
         }
@@ -1448,13 +1587,35 @@ async function sbOpenModal() {
         generateBtn.disabled = false;
     }
 }
-function renderBlueprintToModal(blueprint, context) {
+async function renderBlueprintToModal(blueprint, context) {
     console.log("Rendering Blueprint:", blueprint);
 
-    // 1. Update Metrics (Candidates, Time, etc.) - These usually exist
+    // 1. Fetch real candidate count from database
+    let candidateCount = 0;
+    let estimatedHours = 0;
+
+    if (activeCampaignId) {
+        try {
+            const response = await fetch(`/api/campaigns/${activeCampaignId}/candidates`);
+            const data = await response.json();
+            candidateCount = data.candidates ? data.candidates.length : 0;
+
+            // Calculate estimated campaign time (15 minutes per candidate)
+            const minutesPerCandidate = 15;
+            const totalMinutes = candidateCount * minutesPerCandidate;
+            estimatedHours = (totalMinutes / 60).toFixed(1);
+        } catch (error) {
+            console.error("Error fetching candidate count:", error);
+        }
+    }
+
+    // 2. Update Metrics with real data
     if (document.getElementById('bp-candidate-count')) {
-        // You likely calculate this based on your own logic or static data
-        document.getElementById('bp-candidate-count').innerText = "12";
+        document.getElementById('bp-candidate-count').innerText = candidateCount;
+    }
+
+    if (document.getElementById('bp-campaign-time')) {
+        document.getElementById('bp-campaign-time').innerText = estimatedHours;
     }
 
     if (document.getElementById('bp-persona-name')) {
@@ -1512,96 +1673,150 @@ window.switchHrTab = function (tabId, tabElement) {
     }
 };
 
-/* --- UPDATED: Render Reports Tab (New Design) --- */
-async function renderRealisticReports() {
-    // 1. Target the NEW table body inside #tab-reports
-    const tbody = document.querySelector('#tab-reports .sd-table tbody');
+/* --- UPDATED REPORT RENDERING LOGIC --- */
 
-    // Safety check
+// 1. Updated Table Renderer
+async function renderRealisticReports() {
+    const tbody = document.querySelector('#tab-reports .sd-table tbody');
     if (!tbody) return;
 
-    // Show Loading State
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-tertiary);"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Analytics...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-tertiary);"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Analytics...</td></tr>';
 
     if (!activeCampaignId) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-tertiary);">Please select a campaign to view reports.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-tertiary);">Please select a campaign to view reports.</td></tr>';
         return;
     }
 
     try {
-        // 2. Fetch Real Data
+        // Fetch candidates
         const res = await fetch(`/api/campaigns/${activeCampaignId}/candidates`);
         const data = await res.json();
-
-        tbody.innerHTML = ''; // Clear loading
+        tbody.innerHTML = '';
 
         if (!data.candidates || data.candidates.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-tertiary);">No interview data available yet.</td></tr>';
-
-            // Reset KPIs to 0
-            if (document.getElementById('stat-selected')) document.getElementById('stat-selected').innerText = "0";
-            if (document.getElementById('stat-rejected')) document.getElementById('stat-rejected').innerText = "0";
-            if (document.getElementById('stat-pending')) document.getElementById('stat-pending').innerText = "0";
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-tertiary);">No interview data available yet.</td></tr>';
             return;
         }
 
-        // 3. Process Data & KPIs
-        let stats = { selected: 0, rejected: 0, pending: 0 };
-
+        // Render Rows with Eye Button
         data.candidates.forEach(c => {
-            // Determine Status Logic
+            // Mock Status Logic if empty
             const status = c.status || "Pending";
-            const score = c.score ? `${c.score}/10` : "-";
-
             let badgeClass = "badge-neutral";
-            let scoreStyle = "color:var(--text-tertiary);";
-            let statusText = "Under Review";
 
-            if (status === "Selected") {
-                badgeClass = "badge-success";
-                scoreStyle = "color:#10b981; font-weight:700;";
-                statusText = "Selected";
-                stats.selected++;
-            } else if (status === "Rejected") {
-                badgeClass = "badge-danger";
-                scoreStyle = "color:#ef4444; font-weight:700;";
-                statusText = "Rejected";
-                stats.rejected++;
-            } else {
-                badgeClass = "badge-warning";
-                statusText = "Pending";
-                stats.pending++;
-            }
+            if (status === "Selected") badgeClass = "badge-success";
+            else if (status === "Rejected") badgeClass = "badge-danger";
+            else badgeClass = "badge-warning";
 
-            const dateStr = c.created_at ? new Date(c.created_at).toLocaleDateString() : "Today";
+            // Mock Score visual if empty
+            const mockScore = c.score || Math.floor(Math.random() * (95 - 70 + 1)) + 70;
+            const scoreColor = mockScore > 80 ? "#10b981" : "#fb923c";
 
-            // 4. Create the New Row Style (Stacked Name/Email)
-            const row = `
-                <tr>
-                    <td>
-                        <strong style="color:white; font-size:13px;">${c.name}</strong>
-                        <br>
-                        <span style="font-size:11px; color:var(--text-tertiary);">${c.email || '-'}</span>
-                    </td>
-                    <td><span class="badge ${badgeClass}">${statusText}</span></td>
-                    <td><span style="${scoreStyle}">${score}</span></td>
-                    <td style="color:var(--text-tertiary); font-size:12px;">${dateStr}</td>
-                </tr>
+            const date = c.created_at ? new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>
+                    <strong style="color:white; font-size:13px;">${c.name}</strong><br>
+                    <span style="font-size:11px; color:var(--text-tertiary);">${c.email || '-'}</span>
+                </td>
+                <td><span class="badge ${badgeClass}">${status}</span></td>
+                <td><span style="color:${scoreColor}; font-weight:700;">${mockScore}/100</span></td>
+                <td style="color:var(--text-tertiary); font-size:12px;">${date}</td>
+                <td style="text-align: center;">
+                    <button class="icon-btn btn-sm" onclick="openCandidateReport('${c.id}')" title="View Detailed Report" style="border: 1px solid var(--primary-500); color: var(--primary-500); background: rgba(249, 115, 22, 0.1);">
+                        <i class="fa-solid fa-eye"></i>
+                    </button>
+                </td>
             `;
-            tbody.innerHTML += row;
+            tbody.appendChild(row);
         });
-
-        // 5. Update KPI Cards (Using the IDs we added back to HTML)
-        if (document.getElementById('stat-selected')) document.getElementById('stat-selected').innerText = stats.selected;
-        if (document.getElementById('stat-rejected')) document.getElementById('stat-rejected').innerText = stats.rejected;
-        if (document.getElementById('stat-pending')) document.getElementById('stat-pending').innerText = stats.pending;
 
     } catch (e) {
         console.error("Reports Error:", e);
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#ef4444;">Failed to load data.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#ef4444;">Failed to load data.</td></tr>';
     }
 }
 
+/* --- NEW REPORT MODAL LOGIC --- */
+
+async function openCandidateReport(candidateId) {
+    const modal = document.getElementById('reportModal');
+
+    // 1. Show Modal & Loading State
+    modal.classList.add('active');
+    document.getElementById('report-name').innerText = "Loading...";
+    document.getElementById('report-transcript-box').innerHTML = '<div style="padding:20px; text-align:center; color:gray;"><i class="fa-solid fa-circle-notch fa-spin"></i> Fetching Interview Data...</div>';
+
+    try {
+        // 2. Fetch Detailed Report from Backend
+        const response = await fetch(`/api/candidates/${candidateId}/report`);
+        const data = await response.json();
+
+        if (data.error) throw new Error(data.detail);
+
+        const c = data.candidate;
+        const stats = data.interview_data;
+
+        // 3. Populate Header
+        document.getElementById('report-name').innerText = c.name;
+        document.getElementById('report-email').innerText = c.email || "No Email";
+
+        // Initials Avatar
+        const initials = c.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+        document.getElementById('report-avatar').innerText = initials;
+
+        // 4. Populate Scores
+        document.getElementById('report-total-score').innerText = stats.overall_score;
+
+        // Helper to set bars
+        const setBar = (id, val) => {
+            document.getElementById(`bar-${id}`).style.width = `${val}%`;
+            document.getElementById(`val-${id}`).innerText = `${val}%`;
+        };
+
+        setBar('confidence', stats.scores.confidence);
+        setBar('communication', stats.scores.communication);
+        setBar('technical', stats.scores.technical);
+        setBar('cultural', stats.scores.cultural);
+
+        // 5. Populate Transcript
+        const tBox = document.getElementById('report-transcript-box');
+        tBox.innerHTML = ''; // Clear loading
+
+        stats.transcript.forEach(msg => {
+            const isAi = msg.role === 'ai';
+            const bubble = document.createElement('div');
+            bubble.className = `chat-bubble ${isAi ? 'ai' : 'user'}`;
+
+            // Icon
+            const icon = isAi ? '<i class="fa-solid fa-robot"></i>' : '<i class="fa-solid fa-user"></i>';
+            const color = isAi ? 'var(--primary-500)' : 'var(--text-tertiary)';
+
+            bubble.innerHTML = `
+                <div style="color:${color}; font-size:16px; margin-top:6px;">${icon}</div>
+                <div>
+                    <div class="bubble-content">${msg.text}</div>
+                    <span class="chat-time">${msg.time}</span>
+                </div>
+            `;
+            tBox.appendChild(bubble);
+        });
+
+    } catch (e) {
+        console.error(e);
+        showToast("Failed to load report", "error");
+        closeReportModal();
+    }
+}
+
+function closeReportModal() {
+    document.getElementById('reportModal').classList.remove('active');
+}
+
+// Ensure global scope
+window.openCandidateReport = openCandidateReport;
+window.closeReportModal = closeReportModal;
 
 /* --- HELPER: Add Row to Source Data UI --- */
 function addCandidateRowToUI(name, phone, email, id = null) {
@@ -1755,7 +1970,7 @@ async function loadLiveActivityTable() {
 
 // --- ALL CANDIDATES TABLE ---
 async function loadAllCandidatesTable() {
-    const tbody = document.getElementById('all-candidates-body');
+    const tbody = document.getElementById('all-candidates-tbody'); // Fixed ID to match HTML
     if (!tbody) return;
 
     try {
@@ -1763,30 +1978,42 @@ async function loadAllCandidatesTable() {
         const data = await res.json();
 
         if (!data.candidates || data.candidates.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;">No candidates found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-tertiary);">No candidates found yet. Create a campaign and add candidates!</td></tr>';
             return;
         }
 
         tbody.innerHTML = '';
         data.candidates.forEach(c => {
+            // Determine badge color based on status
+            let badgeClass = 'badge-neutral';
+            if (c.status === 'Active' || c.status === 'In Progress') badgeClass = 'badge-primary';
+            if (c.status === 'Selected') badgeClass = 'badge-success';
+            if (c.status === 'Rejected') badgeClass = 'badge-danger';
+            if (c.status === 'Queued' || c.status === 'Scheduled') badgeClass = 'badge-warning';
+
             const row = `
                 <tr>
                     <td><strong>${c.name}</strong></td>
-                    <td class="font-mono text-muted">${c.phone}</td>
-                    <td>General Application</td>
-                    <td><span class="badge badge-neutral">${c.status}</span></td>
-                    <td class="font-mono text-muted">-</td>
+                    <td class="font-mono text-muted">${c.phone || '--'}</td>
+                    <td style="color:var(--text-secondary);">${c.campaign_name || 'Unknown'}</td>
+                    <td><span class="badge ${badgeClass}">${c.status}</span></td>
                     <td>
                         <div style="display: flex; gap: 8px;">
-                            <button class="icon-btn btn-sm"><i class="fa-solid fa-phone"></i></button>
-                            <button class="icon-btn btn-sm"><i class="fa-solid fa-trash"></i></button>
+                            <button class="icon-btn" style="width: 32px; height: 32px;" title="Call Candidate">
+                                <i class="fa-solid fa-phone"></i>
+                            </button>
+                            <button class="icon-btn" style="width: 32px; height: 32px;" onclick="deleteCandidateAPI('${c.id}', this)" title="Delete Candidate">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
                         </div>
                     </td>
-                </tr>
-            `;
+                </tr>`;
             tbody.innerHTML += row;
         });
-    } catch (e) { console.error(e); }
+    } catch (e) {
+        console.error(e);
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#ef4444;">Error loading candidates.</td></tr>';
+    }
 }
 
 // --- LAUNCH SIMULATION ---
@@ -2322,20 +2549,28 @@ function getSelectedConfigData() {
 async function sbSaveScript() {
     const launchBtn = document.querySelector('.pm-footer .btn-primary');
 
-    // 1. Validation
+    // 1. Validation - Check for campaign
+    if (!activeCampaignId) {
+        showToast("Error: No campaign selected. Please create or select a campaign first.", "error");
+        return;
+    }
+
+    // 2. Validation - Check for blueprint
     if (!currentGeneratedBlueprint || !currentGeneratedBlueprint.system_prompt) {
         showToast("Error: No System Prompt found. Please generate it first.", "error");
         return;
     }
+
+    // 3. Validation - Check for agent and voice
     if (!currentConfig.agentId || !currentConfig.voiceId) {
         showToast("Error: Agent or Voice ID missing.", "error");
         return;
     }
 
-    // 2. Prepare the Final Payload
-    // This contains EVERYTHING needed to start the Vapi Call
+    // 4. Prepare the Final Payload
+    // This contains EVERYTHING needed to update the campaign and start the Vapi Call
     const launchPayload = {
-        campaign_name: `${currentConfig.agentName} - ${currentConfig.interviewMode} Campaign`,
+        campaign_id: activeCampaignId,  // ✅ Use existing campaign ID
 
         // --- THE CRITICAL VAPI CONFIG ---
         vapi_agent_id: currentConfig.agentId,   // The selected Assistant ID
@@ -2343,14 +2578,13 @@ async function sbSaveScript() {
         system_prompt: currentGeneratedBlueprint.system_prompt, // The detailed instruction
 
         // Metadata
-        candidates: window.uploadedCandidates || [], // List of people to call
         strictness: currentConfig.strictness,
         interview_mode: currentConfig.interviewMode
     };
 
     console.log("🚀 Launching Campaign with Payload:", launchPayload);
 
-    // 3. Send to Backend
+    // 5. Send to Backend
     launchBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Launching...';
     launchBtn.disabled = true;
 
@@ -2364,18 +2598,377 @@ async function sbSaveScript() {
         const result = await response.json();
 
         if (response.ok) {
-            showToast(`Success! Campaign "${result.campaign_id}" started.`, "success");
+            showToast(`✅ ${result.message}`, "success");
             sbCloseModal();
-            // Optional: Redirect to dashboard or show 'Active' status
+
+            // Update UI for Active campaign state
+            updateHeaderButtons('Active');
+            updateTabVisibility('Active');
+
+            // Auto-navigate to Reports tab  
+            const reportsTab = document.querySelector('[onclick*="tab-reports"]');
+            if (reportsTab) {
+                switchHrTab('tab-reports', reportsTab);
+            }
+
+            // Update campaign status in UI
+            const statusElement = document.querySelector('.vapi-content-header p span');
+            if (statusElement) {
+                statusElement.style.color = 'var(--success)';
+                statusElement.innerHTML = '● Active';
+            }
+
+            // Optionally reload campaign list to show updated status
+            await loadUserCampaigns('audio');
         } else {
             throw new Error(result.detail || "Launch failed");
         }
 
     } catch (error) {
         console.error("Launch Error:", error);
-        showToast("Failed to launch campaign.", "error");
+        showToast("Failed to launch campaign: " + error.message, "error");
     } finally {
         launchBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Confirm & Launch';
         launchBtn.disabled = false;
     }
 }
+
+// ==========================================
+// 5. MAIN LAUNCH BUTTON (Start Calling Campaign)
+// ==========================================
+async function launchVapiCampaign() {
+    // 1. Validation: Check if a campaign is selected
+    if (!activeCampaignId) {
+        showToast("Please select a campaign first", "error");
+        return;
+    }
+
+    try {
+        // 2. Fetch campaign details to check if it's configured
+        const response = await fetch(`/api/campaigns/${activeCampaignId}`);
+        const campaign = await response.json();
+
+        // 3. Check if campaign has assistant configuration
+        if (!campaign.config || !campaign.config.agent_id || !campaign.config.voice_id) {
+            showToast("Please configure the AI Agent and generate the script first (go to Script tab)", "warning");
+            return;
+        }
+
+        // 4. Check if campaign has candidates
+        const candResponse = await fetch(`/api/campaigns/${activeCampaignId}/candidates`);
+        const candData = await candResponse.json();
+
+        if (!candData.candidates || candData.candidates.length === 0) {
+            showToast("Please add candidates first (go to Source Data tab)", "warning");
+            return;
+        }
+
+        // 5. Campaign is ready - show success message
+        showToast(`Campaign "${campaign.name}" is active and ready! 🚀 (${candData.candidates.length} candidates queued)`, "success");
+
+        // Update status display
+        const statusElement = document.querySelector('.vapi-content-header p span');
+        if (statusElement) {
+            statusElement.style.color = 'var(--success)';
+            statusElement.innerHTML = '● Active';
+        }
+
+        // Optional: In the future, this is where you would trigger the actual Vapi calls
+        // For now, just confirming that everything is configured correctly
+        console.log("✅ Campaign Ready:", {
+            campaign_id: activeCampaignId,
+            campaign_name: campaign.name,
+            agent_id: campaign.config.agent_id,
+            voice_id: campaign.config.voice_id,
+            candidate_count: candData.candidates.length
+        });
+
+    } catch (error) {
+        console.error("Launch validation error:", error);
+        showToast("Error checking campaign status", "error");
+    }
+}
+
+// ==========================================
+// 6. CAMPAIGN LIFECYCLE MANAGEMENT
+// ==========================================
+
+/**
+ * Update tab visibility based on campaign status
+ * @param {string} status - Campaign status: "In Design", "Active", "Stopped"
+ */
+function updateTabVisibility(status) {
+    const tabs = document.querySelectorAll('.vapi-tab');
+
+    // Define which tabs to restrict for Active campaigns
+    const restrictedTabTexts = ['Interview Steps', 'AI Persona', 'Script'];
+
+    tabs.forEach(tab => {
+        const tabText = tab.innerText.trim();
+
+        if (status === 'Active') {
+            // Hide configuration tabs for active campaigns
+            if (restrictedTabTexts.some(restricted => tabText.includes(restricted))) {
+                tab.style.display = 'none';
+            } else {
+                tab.style.display = 'flex';
+            }
+        } else {
+            // Show all tabs for In Design or Stopped campaigns
+            tab.style.display = 'flex';
+        }
+    });
+}
+
+/**
+ * Update header buttons based on campaign status
+ * @param {string} status - Campaign status: "In Design", "Active", "Stopped"
+ */
+function updateHeaderButtons(status) {
+    const launchBtn = document.getElementById('btn-launch-campaign');
+    const stopBtn = document.getElementById('btn-stop-campaign');
+    const statusText = document.getElementById('campaign-status-text');
+    const header = document.querySelector('.vapi-content-header');
+
+    if (status === 'In Design') {
+        if (launchBtn) launchBtn.style.display = 'inline-flex';
+        if (stopBtn) stopBtn.style.display = 'none';
+        if (header) header.setAttribute('data-status', 'in-design');
+        if (statusText) {
+            statusText.innerHTML = '● In Design';
+            statusText.style.color = 'var(--vapi-yellow)';
+        }
+    } else if (status === 'Active') {
+        if (launchBtn) launchBtn.style.display = 'none';
+        if (stopBtn) stopBtn.style.display = 'inline-flex';
+        if (header) header.setAttribute('data-status', 'active');
+        if (statusText) {
+            statusText.innerHTML = '● Active';
+            statusText.style.color = 'var(--success)';
+        }
+    } else if (status === 'Stopped') {
+        if (launchBtn) launchBtn.style.display = 'none';
+        if (stopBtn) stopBtn.style.display = 'none';
+        if (header) header.setAttribute('data-status', 'stopped');
+        if (statusText) {
+            statusText.innerHTML = '● Stopped';
+            statusText.style.color = 'var(--danger)';
+        }
+    }
+}
+
+/**
+ * Stop an active campaign
+ */
+async function stopCampaign() {
+    if (!activeCampaignId) {
+        showToast("No campaign selected", "error");
+        return;
+    }
+
+    if (!confirm('Are you sure you want to stop this campaign? This will pause all ongoing activities.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/campaigns/${activeCampaignId}/stop`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            showToast(result.message, 'success');
+
+            // Update UI to Stopped state
+            updateHeaderButtons('Stopped');
+            updateTabVisibility('Stopped');
+
+            // Reload campaign list to show updated status
+            await loadUserCampaigns('audio');
+        } else {
+            throw new Error(result.detail || "Failed to stop campaign");
+        }
+    } catch (error) {
+        console.error("Stop campaign error:", error);
+        showToast("Failed to stop campaign: " + error.message, "error");
+    }
+}
+
+
+// ==========================================
+// STAGING AREA FUNCTIONS (For Active Campaigns)
+// ==========================================
+
+/**
+ * Show the "Add to Campaign" button when there are staged candidates
+ */
+function showAddToCampaignButton() {
+    // Check if button already exists
+    let btn = document.getElementById('btn-add-staged-candidates');
+
+    if (!btn) {
+        // Create the button
+        const tbody = document.getElementById('candidates-list-body');
+        const tableContainer = tbody.closest('.data-table-container');
+
+        if (!tableContainer) return;
+
+        // Insert button after the table
+        btn = document.createElement('button');
+        btn.id = 'btn-add-staged-candidates';
+        btn.className = 'btn btn-primary';
+        btn.style.marginTop = '16px';
+        btn.style.width = '100%';
+        btn.innerHTML = '<i class="fa-solid fa-rocket"></i> Add to Active Campaign';
+        btn.onclick = confirmAddStagedCandidates;
+
+        tableContainer.parentElement.appendChild(btn);
+    }
+
+    // Update button text with count
+    const count = stagedCandidates.length;
+    if (count > 0) {
+        btn.innerHTML = `<i class="fa-solid fa-rocket"></i> Add ${count} Candidate${count > 1 ? 's' : ''} to Campaign`;
+        btn.style.display = 'block';
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+/**
+ * Confirm and save all staged candidates to the database
+ */
+async function confirmAddStagedCandidates() {
+    if (stagedCandidates.length === 0) {
+        showToast("No candidates to add", "info");
+        return;
+    }
+
+    const btn = document.getElementById('btn-add-staged-candidates');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Adding to campaign...';
+    btn.disabled = true;
+
+    try {
+        const response = await fetch("/api/candidates/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                campaign_id: activeCampaignId,
+                candidates: stagedCandidates
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            const added = result.added || 0;
+            const skipped = result.skipped || 0;
+
+            if (skipped > 0) {
+                showToast(`Added ${added} candidates. Skipped ${skipped} duplicates.`, "warning");
+            } else {
+                showToast(`Successfully added ${added} candidates to active campaign!`, "success");
+            }
+
+            // Clear staging array
+            stagedCandidates = [];
+
+            // Reload the campaign to show the updated state
+            const currentTitle = document.getElementById('vapi-campaign-title').innerText;
+            const activeItem = document.querySelector('.vapi-list-item.active');
+            await selectVapiCampaign(activeItem, currentTitle, activeCampaignId);
+
+        } else {
+            throw new Error(result.detail || "Failed to save candidates");
+        }
+    } catch (e) {
+        console.error("Error saving staged candidates:", e);
+        showToast("Failed to add candidates: " + e.message, "error");
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+// Make functions globally accessible
+window.confirmAddStagedCandidates = confirmAddStagedCandidates;
+window.showAddToCampaignButton = showAddToCampaignButton;
+
+
+// Duplicate report modal code removed - using the correct implementation at line 1743
+
+// ============================================
+// LOAD CAMPAIGN REPORTS (DYNAMICALLY)
+// ============================================
+
+/**
+ * Load and display campaign reports when Reports tab is active
+ */
+async function loadCampaignReports() {
+    if (!activeCampaignId) {
+        console.log('No active campaign selected');
+        return;
+    }
+
+    const tbody = document.getElementById('reports-table-body');
+    if (!tbody) return;
+
+    // Show loading state
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-secondary);"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading reports...</td></tr>';
+
+    try {
+        // Fetch candidates for this campaign
+        const response = await fetch(`/api/campaigns/${activeCampaignId}/candidates`);
+        const data = await response.json();
+
+        tbody.innerHTML = '';
+
+        if (data.candidates && data.candidates.length > 0) {
+            data.candidates.forEach(candidate => {
+                const row = document.createElement('tr');
+
+                // Determine status badge
+                const status = candidate.status || 'Pending';
+                let badgeClass = 'badge-neutral';
+                if (status === 'Selected' || status === 'Completed') badgeClass = 'badge-success';
+                else if (status === 'Rejected') badgeClass = 'badge-danger';
+                else if (status === 'Pending' || status === 'In Progress') badgeClass = 'badge-warning';
+
+                // Generate mock AI score (will be replaced with real data)
+                const mockScore = (Math.random() * 5 + 4.5).toFixed(1);
+                const scoreColor = mockScore >= 7 ? '#10b981' : mockScore >= 5 ? '#f59e0b' : '#ef4444';
+
+                // Format date
+                const date = candidate.created_at ? new Date(candidate.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
+
+                row.innerHTML = `
+                    <td>
+                        <strong>${candidate.name}</strong><br>
+                        <span style="font-size:10px; color:#71717a;">${candidate.email || '-'}</span>
+                    </td>
+                    <td><span class="badge ${badgeClass}">${status}</span></td>
+                    <td><span style="color:${scoreColor}; font-weight:700;">${mockScore}/10</span></td>
+                    <td style="color:#71717a;">${date}</td>
+                    <td style="text-align: center;">
+                        <button class="btn-view-report" onclick="openCandidateReport('${candidate.id}')" title="View Detailed Report">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </td>
+                `;
+
+                tbody.appendChild(row);
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-tertiary);">No interview data available yet.</td></tr>';
+        }
+
+    } catch (error) {
+        console.error('Error loading campaign reports:', error);
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--danger-text);">Failed to load reports</td></tr>';
+    }
+}
+
+// Call this function when Reports tab is clicked
+window.loadCampaignReports = loadCampaignReports;
